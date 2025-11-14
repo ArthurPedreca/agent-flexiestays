@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { UIMessage } from 'ai'
+import { createUIMessageStreamResponse, createUIMessageStream } from 'ai'
 
 defineRouteMeta({
   openAPI: {
@@ -77,16 +78,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    // Prepare messages for n8n (convert UIMessage format to simple chat format)
-    const formattedMessages = messages.map(m => ({
-      role: m.role,
-      content: m.parts
-        .filter(p => p.type === 'text')
-        .map(p => 'text' in p ? p.text : '')
-        .join('')
-    }))
+    // Prepare messages for n8n
+    const lastUserMessage = messages[messages.length - 1]
+    const userMessageText = lastUserMessage.parts
+      .filter(p => p.type === 'text')
+      .map(p => 'text' in p ? p.text : '')
+      .join('')
 
-    // Call n8n webhook with streaming
+    // Call n8n webhook
     const response = await fetch(n8nWebhookUrl, {
       method: 'POST',
       headers: {
@@ -94,9 +93,11 @@ export default defineEventHandler(async (event) => {
         ...(n8nWebhookToken ? { Authorization: `Bearer ${n8nWebhookToken}` } : {})
       },
       body: JSON.stringify({
-        chatId: id,
-        model,
-        messages: formattedMessages,
+        query: {
+          message: userMessageText,
+          sessionId: session.user?.id || session.id,
+          chatId: id
+        },
         userId: session.user?.id || session.id,
         username: session.user?.username || 'User'
       })
@@ -111,73 +112,68 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // Set up streaming response headers
-    setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
-    setHeader(event, 'Cache-Control', 'no-cache, no-transform')
-    setHeader(event, 'Connection', 'keep-alive')
-    setHeader(event, 'X-Content-Type-Options', 'nosniff')
+    // Parse n8n response (array of chunks)
+    const n8nChunks = await response.json()
 
-    const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
-
-    if (!reader) {
-      throw createError({ statusCode: 500, statusMessage: 'No response body from n8n' })
-    }
-
-    // Store assistant message text for database
-    let assistantText = ''
-    let buffer = ''
-
-    // Create a readable stream to return
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-
-            if (done) {
-              // Process any remaining buffer
-              if (buffer.trim()) {
-                assistantText += buffer
-                controller.enqueue(new TextEncoder().encode(buffer))
-              }
-              break
-            }
-
-            const chunk = decoder.decode(value, { stream: true })
-            buffer += chunk
-
-            // Forward chunk to client
-            controller.enqueue(value)
-
-            // Collect text for database storage (simple approach: just accumulate all text)
-            assistantText += chunk
+    // Create UI message stream
+    const stream = createUIMessageStream({
+      execute: async ({ writer }) => {
+        // Process each chunk from n8n
+        for (const chunk of n8nChunks) {
+          // Add delay if specified
+          if (chunk.delay && chunk.delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, chunk.delay * 1000))
           }
 
-          // Save assistant message to database
-          if (assistantText.trim()) {
-            await db.insert(tables.messages).values({
-              chatId: id,
-              role: 'assistant',
-              parts: [{
-                type: 'text',
-                text: assistantText.trim()
-              }]
+          // Handle different chunk types
+          if (chunk.type === 'carousel') {
+            // Write carousel as custom tool invocation
+            writer.write({
+              type: 'tool-carousel',
+              state: 'result',
+              properties: chunk.properties,
+              result: { properties: chunk.properties }
             })
+          } else if (chunk.type === 'text' && chunk.clickable_properties) {
+            // Write clickable properties
+            writer.write({
+              type: 'tool-clickable-properties',
+              state: 'result',
+              text: chunk.text,
+              clickable_properties: chunk.clickable_properties,
+              result: {
+                text: chunk.text,
+                clickable_properties: chunk.clickable_properties
+              }
+            })
+          } else if (chunk.type === 'text') {
+            // Stream text word by word for smooth effect
+            const words = chunk.text.split(' ')
+            for (let i = 0; i < words.length; i++) {
+              const word = words[i] + (i < words.length - 1 ? ' ' : '')
+              writer.write({
+                type: 'text',
+                text: word
+              })
+              // Small delay between words for streaming effect
+              await new Promise(resolve => setTimeout(resolve, 30))
+            }
           }
-
-          controller.close()
-        } catch (error) {
-          console.error('Streaming error:', error)
-          controller.error(error)
         }
       },
-      cancel() {
-        reader.cancel()
+      onFinish: async ({ messages: streamMessages }) => {
+        // Save assistant message to database
+        await db.insert(tables.messages).values(streamMessages.map(message => ({
+          chatId: chat.id,
+          role: message.role as 'user' | 'assistant',
+          parts: message.parts
+        })))
       }
     })
 
-    return sendStream(event, stream)
+    return createUIMessageStreamResponse({
+      stream
+    })
   } catch (error) {
     console.error('n8n integration error:', error)
 

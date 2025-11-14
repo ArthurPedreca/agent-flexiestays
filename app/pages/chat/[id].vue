@@ -199,6 +199,14 @@ onMounted(() => {
                   v-else-if="part.type === 'tool-chart'"
                   :invocation="(part as ChartUIToolInvocation)"
                 />
+                <ToolCarousel
+                  v-else-if="part.type === 'tool-carousel'"
+                  :invocation="(part as any)"
+                />
+                <ToolClickableProperties
+                  v-else-if="part.type === 'tool-clickable-properties'"
+                  :invocation="(part as any)"
+                />
               </template>
             </div>
           </template>

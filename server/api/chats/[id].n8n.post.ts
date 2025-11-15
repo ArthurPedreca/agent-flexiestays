@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { UIMessage } from 'ai'
+import { parseRichContent } from '../../../shared/utils'
 
 defineRouteMeta({
   openAPI: {
@@ -66,7 +67,7 @@ export default defineEventHandler(async (event) => {
   }
 
   // Get n8n webhook URL from config
-  const n8nWebhookUrl = config.public.n8nWebhookUrl
+  const n8nWebhookUrl = config.n8nWebhookUrl || config.public.n8nWebhookUrl
   const n8nWebhookToken = config.n8nWebhookToken
 
   if (!n8nWebhookUrl) {
@@ -154,15 +155,25 @@ export default defineEventHandler(async (event) => {
             assistantText += chunk
           }
 
-          // Save assistant message to database
-          if (assistantText.trim()) {
+          const parsed = parseRichContent(assistantText.trim())
+          const assistantParts: Array<Record<string, unknown>> = []
+
+          if (parsed.markdown) {
+            assistantParts.push({
+              type: 'text',
+              text: parsed.markdown
+            })
+          }
+
+          if (parsed.artifacts.length) {
+            assistantParts.push(...parsed.artifacts)
+          }
+
+          if (assistantParts.length) {
             await db.insert(tables.messages).values({
               chatId: id,
               role: 'assistant',
-              parts: [{
-                type: 'text',
-                text: assistantText.trim()
-              }]
+              parts: assistantParts
             })
           }
 

@@ -1,3 +1,5 @@
+const defaultN8nWebhook = 'https://skoobiedigital.app.n8n.cloud/webhook/bubble-streaming'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   modules: [
@@ -39,10 +41,13 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     // Private keys (server-side only)
+    n8nWebhookUrl: process.env.N8N_WEBHOOK_URL || defaultN8nWebhook,
     n8nWebhookToken: process.env.N8N_WEBHOOK_TOKEN || '',
     // Public keys (client-side accessible)
     public: {
-      n8nWebhookUrl: process.env.NUXT_PUBLIC_N8N_WEBHOOK_URL || ''
+      n8nWebhookUrl: process.env.NUXT_PUBLIC_N8N_WEBHOOK_URL
+        || process.env.N8N_WEBHOOK_URL
+        || defaultN8nWebhook
     }
   }
 })

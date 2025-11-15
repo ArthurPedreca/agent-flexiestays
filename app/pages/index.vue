@@ -1,55 +1,49 @@
 <script setup lang="ts">
-const input = ref('')
-const loading = ref(false)
-
-const { model } = useModels()
+const input = ref("");
+const loading = ref(false);
 
 async function createChat(prompt: string) {
-  input.value = prompt
-  loading.value = true
-  const chat = await $fetch('/api/chats', {
-    method: 'POST',
-    body: { input: prompt }
-  })
+  input.value = prompt;
+  loading.value = true;
 
-  refreshNuxtData('chats')
-  navigateTo(`/chat/${chat?.id}`)
+  try {
+    const chat = await $fetch("/api/chats", {
+      method: 'POST',
+      body: { input: prompt }
+    })
+
+    refreshNuxtData('chats')
+    navigateTo(`/chat/${chat?.id}`)
+  } catch (error) {
+    console.error('Error creating chat:', error)
+    loading.value = false
+  }
 }
 
 function onSubmit() {
-  createChat(input.value)
+  if (input.value.trim()) {
+    createChat(input.value);
+  }
 }
 
 const quickChats = [
   {
-    label: 'Why use Nuxt UI?',
-    icon: 'i-logos-nuxt-icon'
+    label: 'Como funciona o FlexiStays?',
+    icon: 'i-lucide-home'
   },
   {
-    label: 'Help me create a Vue composable',
-    icon: 'i-logos-vue'
+    label: 'Ajude-me a encontrar uma acomodação',
+    icon: 'i-lucide-search'
   },
   {
-    label: 'Tell me more about UnJS',
-    icon: 'i-logos-unjs'
+    label: 'Quais são as opções de pagamento?',
+    icon: "i-lucide-credit-card"
   },
   {
-    label: 'Why should I consider VueUse?',
-    icon: 'i-logos-vueuse'
+    label: 'Preciso de ajuda com minha reserva',
+    icon: "i-lucide-calendar"
   },
-  {
-    label: 'Tailwind CSS best practices',
-    icon: 'i-logos-tailwindcss-icon'
-  },
-  {
-    label: 'What is the weather in Bordeaux?',
-    icon: 'i-lucide-sun'
-  },
-  {
-    label: 'Show me a chart of sales data',
-    icon: 'i-lucide-line-chart'
-  }
-]
+];
 </script>
 
 <template>
@@ -59,9 +53,11 @@ const quickChats = [
     </template>
 
     <template #body>
-      <UContainer class="flex-1 flex flex-col justify-center gap-4 sm:gap-6 py-8">
+      <UContainer
+        class="flex-1 flex flex-col justify-center gap-4 sm:gap-6 py-8"
+      >
         <h1 class="text-3xl sm:text-4xl text-highlighted font-bold">
-          How can I help you today?
+          Como posso ajudar você hoje?
         </h1>
 
         <UChatPrompt
@@ -72,10 +68,6 @@ const quickChats = [
           @submit="onSubmit"
         >
           <UChatPromptSubmit color="neutral" />
-
-          <template #footer>
-            <ModelSelect v-model="model" />
-          </template>
         </UChatPrompt>
 
         <div class="flex flex-wrap gap-2">
@@ -88,6 +80,7 @@ const quickChats = [
             color="neutral"
             variant="outline"
             class="rounded-full"
+            :disabled="loading"
             @click="createChat(quickChat.label)"
           />
         </div>

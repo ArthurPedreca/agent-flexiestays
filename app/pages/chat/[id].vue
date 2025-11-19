@@ -46,11 +46,7 @@ const input = ref("");
 const initialMessages = (data.value.messages ??
   []) as unknown as FlexiMessage[];
 
-const config = useRuntimeConfig();
-const webhookUrl = computed(() => config.public.n8nWebhookUrl as string);
-
 const { messages, status, error, sendMessage, stop } = useN8nChat({
-  webhookUrl: webhookUrl.value,
   chatId: data.value.id,
   initialMessages,
 });
@@ -66,16 +62,6 @@ const uiStatus = computed<"ready" | "streaming">(() =>
 function handleSubmit(e: Event) {
   e.preventDefault();
   if (!input.value.trim()) {
-    return;
-  }
-
-  if (!webhookUrl.value) {
-    toast.add({
-      title: "Configure o webhook",
-      description: "Defina a variável N8N_WEBHOOK_URL no arquivo .env",
-      icon: "i-lucide-alert-triangle",
-      color: "warning",
-    });
     return;
   }
 
@@ -208,3 +194,4 @@ watch(error, (value) => {
     </template>
   </UDashboardPanel>
 </template>
+

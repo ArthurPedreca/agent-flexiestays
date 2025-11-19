@@ -47,7 +47,8 @@ export default defineNuxtConfig({
     public: {
       n8nWebhookUrl: process.env.NUXT_PUBLIC_N8N_WEBHOOK_URL
         || process.env.N8N_WEBHOOK_URL
-        || defaultN8nWebhook
+        || defaultN8nWebhook,
+      n8nTitleWebhookUrl: process.env.NUXT_PUBLIC_N8N_TITLE_WEBHOOK_URL || ''
     }
   }
 })

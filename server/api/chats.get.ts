@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { useDrizzle, tables, eq } from '../database/drizzle'
 
 export default defineEventHandler(async (event) => {
   const session = await getUserSession(event)

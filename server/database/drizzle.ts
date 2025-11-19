@@ -1,11 +1,13 @@
+// server/database/drizzle.ts
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 
-import * as schema from '../database/schema'
+// importa o schema que você já tem
+import * as schema from './schema'
 
 export { sql, eq, and, or, desc, asc } from 'drizzle-orm'
-
 export const tables = schema
+export type DB = ReturnType<typeof drizzle<typeof schema>>
 
 let pool: Pool | null = null
 let db: ReturnType<typeof drizzle> | null = null
@@ -18,7 +20,10 @@ export function useDrizzle() {
       throw new Error('DATABASE_URL or NUXT_DATABASE_URL is not defined')
     }
 
-    console.log('Connecting to database:', databaseUrl.replace(/:[^:@]+@/, ':****@'))
+    console.log(
+      'Connecting to database:',
+      databaseUrl.replace(/:[^:@]+@/, ':****@')
+    )
 
     pool = new Pool({
       connectionString: databaseUrl,
@@ -30,10 +35,10 @@ export function useDrizzle() {
   }
 
   if (!db) {
-    db = drizzle(pool, { schema })
+    db = drizzle(pool, { schema }) as DB
   }
 
-  return db
+  return db as DB
 }
 
 export type Chat = typeof schema.chats.$inferSelect

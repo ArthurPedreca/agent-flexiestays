@@ -1,3 +1,5 @@
+import { useDrizzle, tables } from '../database/drizzle'
+
 export default defineEventHandler(async (event) => {
   const session = await getUserSession(event)
 

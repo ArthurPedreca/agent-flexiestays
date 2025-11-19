@@ -1,32 +1,51 @@
-import { chats } from '../../../database/schema'
-import { eq } from 'drizzle-orm'
+import { z } from 'zod'
+import { useDrizzle, tables, eq, and } from '../../../database/drizzle'
 
 export default defineEventHandler(async (event) => {
-  const chatId = getRouterParam(event, 'id')
-
-  if (!chatId) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Chat ID is required'
-    })
-  }
-
-  const body = await readBody(event)
-
-  if (!body.title) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Title is required'
-    })
-  }
-
+  const session = await getUserSession(event)
   const db = useDrizzle()
 
-  const [chat] = await db
-    .update(chats)
-    .set({ title: body.title })
-    .where(eq(chats.id, chatId))
-    .returning()
+  const { id } = await getValidatedRouterParams(
+    event,
+    z.object({
+      id: z.string().min(1).max(36)
+    }).parse
+  )
 
-  return chat
+  const { title } = await readValidatedBody(
+    event,
+    z.object({
+      title: z.string().min(1).max(200)
+    }).parse
+  )
+
+  const userId = session.user?.id || session.id
+  if (!userId) {
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'User not authenticated'
+    })
+  }
+
+  // Ensure the chat belongs to the authenticated user
+  const chat = await db.query.chats.findFirst({
+    where: (chat) => and(
+      eq(chat.id, id),
+      eq(chat.userId, userId)
+    )
+  })
+
+  if (!chat) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Chat not found'
+    })
+  }
+
+  await db
+    .update(tables.chats)
+    .set({ title })
+    .where(eq(tables.chats.id, id))
+
+  return { ok: true, title }
 })

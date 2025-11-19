@@ -10,18 +10,15 @@ interface MutableTextPart {
 }
 
 interface UseN8nChatOptions {
-  webhookUrl: string
-  chatId?: string
+  chatId: string
   initialMessages?: FlexiMessage[]
 }
 
 export function useN8nChat(options: UseN8nChatOptions) {
-  // Use provided chatId or generate unique chat ID for this session
-  const chatId = options.chatId || `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  const { chatId, initialMessages } = options
 
-  // Initialize with provided messages or welcome message
-  const messages = ref<FlexiMessage[]>(options.initialMessages && options.initialMessages.length > 0
-    ? [...options.initialMessages]
+  const messages = ref<FlexiMessage[]>(initialMessages && initialMessages.length > 0
+    ? [...initialMessages]
     : [
       {
         id: generateMessageId(),
@@ -45,13 +42,8 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
     error.value = null
 
-    // Add user message
     const userMessage = createUserMessage(text)
     messages.value = [...messages.value, userMessage]
-
-    // Save user message to database (will create chat if doesn't exist)
-    await ensureChatExists(chatId)
-    await persistMessage(chatId, 'user', userMessage.parts)
 
     // Create assistant message placeholder
     const assistantMessage = createAssistantMessage()
@@ -63,13 +55,12 @@ export function useN8nChat(options: UseN8nChatOptions) {
     abortController.value = new AbortController()
 
     try {
-      const response = await fetch(options.webhookUrl, {
+      const response = await fetch(`/api/chats/${chatId}/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          chatId,
           message: text
         }),
         signal: abortController.value.signal
@@ -178,14 +169,7 @@ export function useN8nChat(options: UseN8nChatOptions) {
       textPart.state = 'done'
       status.value = 'ready'
 
-      // Save assistant message to database
-      await persistMessage(chatId, 'assistant', assistantMessage.parts)
       await refreshNuxtData('chats')
-
-      // Generate title if this is the first user message (second message overall, after welcome)
-      if (messages.value.length === 3) {
-        await generateChatTitle(chatId, text)
-      }
     } catch (err) {
       if (isAbortError(err)) {
         textPart.state = 'done'
@@ -290,57 +274,4 @@ async function safeReadBody(response: Response) {
   }
 }
 
-async function ensureChatExists(chatId: string) {
-  try {
-    // Create chat if it doesn't exist (idempotent operation)
-    await $fetch('/api/chats', {
-      method: 'POST',
-      body: {
-        id: chatId,
-        input: ''
-      }
-    })
-  } catch (error: unknown) {
-    // Ignore errors (chat might already exist)
-    const err = error as { data?: { message?: string }, statusCode?: number }
-    if (!err?.data?.message?.includes('duplicate') && !err?.statusCode?.toString().startsWith('4')) {
-      console.error('Error ensuring chat exists:', error)
-    }
-  }
-}
 
-async function persistMessage(
-  chatId: string,
-  role: 'user' | 'assistant',
-  parts: FlexiMessage['parts']
-) {
-  try {
-    await $fetch(`/api/chats/${chatId}/messages`, {
-      method: 'POST',
-      body: {
-        role,
-        parts
-      }
-    })
-  } catch (persistError) {
-    console.error('Falha ao salvar mensagem do agente', persistError)
-  }
-}
-
-async function generateChatTitle(chatId: string, firstMessage: string) {
-  try {
-    // Use first 50 chars of the message as title
-    const title = firstMessage.length > 50
-      ? firstMessage.substring(0, 50) + '...'
-      : firstMessage
-
-    await $fetch(`/api/chats/${chatId}/title`, {
-      method: 'POST',
-      body: { title }
-    })
-
-    await refreshNuxtData('chats')
-  } catch (error) {
-    console.error('Failed to generate chat title:', error)
-  }
-}

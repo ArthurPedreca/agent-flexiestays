@@ -91,12 +91,18 @@ export function extractArtifacts(source: string): ExtractArtifactsResult {
   }
 }
 
+function normalizeLooseBbcode(value: string): string {
+  return value
+    .replace(/\[(\/?)(b|i|u|s)(?!])/gi, '[$1$2]')
+    .replace(/\[(\/?)bbcode(?!])/gi, '[$1bbcode]')
+}
+
 export function bbcodeToMarkdown(input: string): string {
   if (!input) {
     return ''
   }
 
-  let output = input.replace(/\r\n/g, '\n')
+  let output = normalizeLooseBbcode(input).replace(/\r\n/g, '\n')
 
   const replacements: Array<[RegExp, string]> = [
     [/\[br\s*\/?\]/gi, '\n'],

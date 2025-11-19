@@ -34,16 +34,22 @@ export function useN8nChat(options: UseN8nChatOptions) {
   const error = ref<Error | null>(null)
   const abortController = ref<AbortController | null>(null)
 
-  const sendMessage = async (rawText: string) => {
-    const text = rawText.trim()
-    if (!text || status.value !== 'ready') {
+  const streamMessage = async (options: {
+    text: string
+    persistUserMessage: boolean
+    existingUserMessage?: FlexiMessage
+  }) => {
+    const normalizedText = options.text.trim()
+    if (!normalizedText || status.value !== 'ready') {
       return
     }
 
     error.value = null
 
-    const userMessage = createUserMessage(text)
-    messages.value = [...messages.value, userMessage]
+    const userMessage = options.existingUserMessage ?? createUserMessage(normalizedText)
+    if (!options.existingUserMessage) {
+      messages.value = [...messages.value, userMessage]
+    }
 
     // Create assistant message placeholder
     const assistantMessage = createAssistantMessage()
@@ -61,7 +67,8 @@ export function useN8nChat(options: UseN8nChatOptions) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          message: text
+          message: normalizedText,
+          persistUserMessage: options.persistUserMessage
         }),
         signal: abortController.value.signal
       })
@@ -186,6 +193,39 @@ export function useN8nChat(options: UseN8nChatOptions) {
     }
   }
 
+  const sendMessage = async (rawText: string) => {
+    await streamMessage({
+      text: rawText,
+      persistUserMessage: true
+    })
+  }
+
+  const shouldBootstrapPending = Boolean(
+    initialMessages &&
+    initialMessages.length > 0 &&
+    initialMessages[initialMessages.length - 1]?.role === 'user'
+  )
+
+  if (import.meta.client && shouldBootstrapPending) {
+    setTimeout(() => {
+      const pendingMessage = findPendingUserMessage(messages.value)
+      if (!pendingMessage) {
+        return
+      }
+
+      const pendingText = getTextFromParts(pendingMessage.parts).trim()
+      if (!pendingText) {
+        return
+      }
+
+      streamMessage({
+        text: pendingText,
+        persistUserMessage: false,
+        existingUserMessage: pendingMessage
+      })
+    }, 0)
+  }
+
   const stop = () => {
     if (abortController.value) {
       abortController.value.abort()
@@ -246,6 +286,32 @@ function findTextPart(message: FlexiMessage): MutableTextPart {
   const fallback: MutableTextPart = { type: 'text', text: '', state: 'streaming' }
   message.parts.unshift(fallback)
   return fallback
+}
+
+function findPendingUserMessage(items: FlexiMessage[]): FlexiMessage | null {
+  if (!items.length) {
+    return null
+  }
+
+  const last = items[items.length - 1]
+  return last?.role === 'user' ? last : null
+}
+
+function getTextFromParts(parts: FlexiMessage['parts']): string {
+  if (!Array.isArray(parts)) {
+    return ''
+  }
+
+  return parts
+    .map((part) => {
+      if (part && typeof part === 'object' && 'text' in part) {
+        const value = (part as Record<string, unknown>).text
+        return typeof value === 'string' ? value : ''
+      }
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
 }
 
 function generateMessageId() {

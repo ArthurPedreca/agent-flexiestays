@@ -2,6 +2,16 @@ import { z } from 'zod'
 import { parseRichContent } from '../../../../shared/utils'
 import { useDrizzle, tables, eq, and } from '../../../database/drizzle'
 
+const STREAM_SKIP_TOKENS = new Set([
+  '[',
+  ']',
+  'bbcode',
+  '[bbcode]',
+  'bbcode]',
+  '/bbcode',
+  '[/bbcode]'
+])
+
 defineRouteMeta({
   openAPI: {
     description: 'Proxy chat requests to n8n (streaming)',
@@ -18,9 +28,12 @@ export default defineEventHandler(async (event) => {
     id: z.string().min(1).max(36)
   }).parse)
 
-  const { message } = await readValidatedBody(event, z.object({
-    message: z.string().trim().min(1)
+  const { message, persistUserMessage } = await readValidatedBody(event, z.object({
+    message: z.string().trim().min(1),
+    persistUserMessage: z.boolean().optional()
   }).parse)
+
+  const shouldPersistUserMessage = persistUserMessage ?? true
 
   const userId = session.user?.id || session.id
   if (!userId) {
@@ -49,13 +62,13 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  // Persist the user message before calling n8n
-  const userParts = [{ type: 'text', text: message }]
-  await db.insert(tables.messages).values({
-    chatId: id,
-    role: 'user',
-    parts: userParts
-  })
+  if (shouldPersistUserMessage) {
+    await db.insert(tables.messages).values({
+      chatId: id,
+      role: 'user',
+      parts: [{ type: 'text', text: message }]
+    })
+  }
 
   const firstUserMessage = chat.messages.find(msg => msg.role === 'user')
   const titleSource = firstUserMessage
@@ -81,16 +94,20 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const history = [
-    ...chat.messages.map(message => ({
-      role: message.role,
-      content: flattenMessageParts(message.parts)
-    })),
-    {
-      role: 'user',
-      content: message
-    }
-  ]
+  const historyBase = chat.messages.map(message => ({
+    role: message.role,
+    content: flattenMessageParts(message.parts)
+  }))
+
+  const history = shouldPersistUserMessage
+    ? [
+      ...historyBase,
+      {
+        role: 'user',
+        content: message
+      }
+    ]
+    : historyBase
 
   try {
     const response = await fetch(n8nWebhookUrl, {
@@ -133,7 +150,42 @@ export default defineEventHandler(async (event) => {
     }
 
     let assistantText = ''
-    let buffer = ''
+    let jsonBuffer = ''
+
+    const processLine = (rawLine: string) => {
+      const line = rawLine.trim()
+      if (!line) {
+        return
+      }
+
+      try {
+        const parsed = JSON.parse(line)
+        const content = typeof parsed?.content === 'string' ? parsed.content : ''
+        if (parsed?.type === 'item' && content) {
+          const normalized = content.trim()
+          if (!STREAM_SKIP_TOKENS.has(normalized)) {
+            assistantText += content
+          }
+        }
+      } catch {
+        // Ignore malformed JSON lines
+      }
+    }
+
+    const flushJsonBuffer = (flushAll = false) => {
+      let newlineIndex = jsonBuffer.indexOf('\n')
+      while (newlineIndex !== -1) {
+        const line = jsonBuffer.slice(0, newlineIndex)
+        jsonBuffer = jsonBuffer.slice(newlineIndex + 1)
+        processLine(line)
+        newlineIndex = jsonBuffer.indexOf('\n')
+      }
+
+      if (flushAll && jsonBuffer.trim()) {
+        processLine(jsonBuffer)
+        jsonBuffer = ''
+      }
+    }
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -142,18 +194,15 @@ export default defineEventHandler(async (event) => {
             const { done, value } = await reader.read()
 
             if (done) {
-              if (buffer.trim()) {
-                assistantText += buffer
-                controller.enqueue(new TextEncoder().encode(buffer))
-              }
+              flushJsonBuffer(true)
               break
             }
 
             const chunk = decoder.decode(value, { stream: true })
-            buffer += chunk
+            jsonBuffer += chunk
+            flushJsonBuffer()
 
             controller.enqueue(value)
-            assistantText += chunk
           }
 
           const parsed = parseRichContent(assistantText.trim())

@@ -141,13 +141,22 @@ watch(error, (value) => {
                   :text="part.text"
                   :is-streaming="part.state !== 'done'"
                 />
+                <!-- Show loading dots when waiting for first response -->
+                <LoadingDots
+                  v-else-if="part.type === 'text' && 'state' in part && part.state === 'waiting'"
+                />
+                <!-- Show text content when streaming or done -->
                 <MDCCached
-                  v-else-if="part.type === 'text'"
+                  v-else-if="part.type === 'text' && part.text"
                   :value="part.text"
                   :cache-key="`${message.id}-${index}`"
                   :components="components"
                   :parser-options="{ highlight: false }"
                   class="*:first:mt-0 *:last:mb-0"
+                />
+                <!-- Empty state fallback for text parts without content -->
+                <LoadingDots
+                  v-else-if="part.type === 'text' && !part.text"
                 />
                 <ToolWeather
                   v-else-if="part.type === 'tool-weather'"

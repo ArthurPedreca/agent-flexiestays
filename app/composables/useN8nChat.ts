@@ -6,7 +6,7 @@ export type ChatStatus = 'ready' | 'streaming'
 interface MutableTextPart {
   type: 'text'
   text: string
-  state?: 'streaming' | 'done'
+  state?: 'waiting' | 'streaming' | 'done'
 }
 
 interface UseN8nChatOptions {
@@ -55,12 +55,20 @@ export function useN8nChat(options: UseN8nChatOptions) {
     const assistantMessage = createAssistantMessage()
     messages.value = [...messages.value, assistantMessage]
     const textPart = findTextPart(assistantMessage)
-    textPart.state = 'streaming'
+    textPart.state = 'waiting' // Start with waiting state
+
+    console.log('🔵 Estado inicial da mensagem:', {
+      state: textPart.state,
+      messageId: assistantMessage.id,
+      parts: assistantMessage.parts
+    })
 
     status.value = 'streaming'
     abortController.value = new AbortController()
 
     try {
+      // Call the server API endpoint which proxies to n8n
+      // The server will persist both user and assistant messages
       const response = await fetch(`/api/chats/${chatId}/stream`, {
         method: 'POST',
         headers: {
@@ -116,6 +124,10 @@ export function useN8nChat(options: UseN8nChatOptions) {
               // Only mark as not first content when we actually add real content
               if (isFirstContent && content) {
                 isFirstContent = false
+                // Change from waiting to streaming when first real content arrives
+                if (textPart.state === 'waiting') {
+                  textPart.state = 'streaming'
+                }
               }
 
               rawBuffer += parsed.content
@@ -175,6 +187,9 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
       textPart.state = 'done'
       status.value = 'ready'
+
+      // Note: Assistant message is already saved by the server endpoint
+      // No need to persist here to avoid duplication
 
       await refreshNuxtData('chats')
     } catch (err) {
@@ -272,7 +287,7 @@ function createAssistantMessage(): FlexiMessage {
     parts: [{
       type: 'text',
       text: '',
-      state: 'streaming'
+      state: 'waiting' // Start with waiting state
     }]
   }
 }
@@ -283,7 +298,7 @@ function findTextPart(message: FlexiMessage): MutableTextPart {
     return part as MutableTextPart
   }
 
-  const fallback: MutableTextPart = { type: 'text', text: '', state: 'streaming' }
+  const fallback: MutableTextPart = { type: 'text', text: '', state: 'waiting' }
   message.parts.unshift(fallback)
   return fallback
 }

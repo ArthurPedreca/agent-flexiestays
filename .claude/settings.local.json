@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run db:migrate:*)",
+      "Bash(node test-db.mjs:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

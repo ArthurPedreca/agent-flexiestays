@@ -22,6 +22,7 @@ export default defineEventHandler(async (event) => {
 
   const userId = session.user?.id || session.id
   if (!userId) {
+    console.error('❌ Usuário não autenticado ao tentar salvar mensagem')
     throw createError({
       statusCode: 401,
       statusMessage: 'User not authenticated'
@@ -37,16 +38,24 @@ export default defineEventHandler(async (event) => {
   })
 
   if (!chat) {
+    console.error('❌ Chat não encontrado:', { chatId: id, userId })
     throw createError({
       statusCode: 404,
       statusMessage: 'Chat not found'
     })
   }
 
-  await db.insert(tables.messages).values({
+  const result = await db.insert(tables.messages).values({
     chatId: id,
     role: body.role,
     parts: body.parts
+  })
+
+  console.log('✅ Mensagem salva no Supabase:', {
+    chatId: id,
+    role: body.role,
+    userId,
+    partsCount: body.parts.length
   })
 
   return { ok: true }

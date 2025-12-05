@@ -1,7 +1,7 @@
 import type { FlexiMessage, ArtifactUIPart } from '../../shared/types/chat'
-import { bbcodeToMarkdown, extractArtifacts } from '../../shared/utils'
+import { extractArtifacts } from '../../shared/utils'
 
-export type ChatStatus = 'ready' | 'streaming'
+export type ChatStatus = 'ready' | 'streaming' | 'submitting'
 
 interface MutableTextPart {
   type: 'text'
@@ -17,18 +17,18 @@ interface UseN8nChatOptions {
 export function useN8nChat(options: UseN8nChatOptions) {
   const { chatId, initialMessages } = options
 
-  const messages = ref<FlexiMessage[]>(initialMessages && initialMessages.length > 0
-    ? [...initialMessages]
-    : [
-      {
+  const messages = ref<FlexiMessage[]>(
+    initialMessages?.length
+      ? [...initialMessages]
+      : [{
         id: generateMessageId(),
         role: 'assistant',
         parts: [{
           type: 'text',
-          text: 'Olá! Como posso ajudar você hoje?'
+          text: 'Hello! I\'m your Flexiestays assistant. How can I help you find your perfect accommodation today?'
         }]
-      }
-    ])
+      }]
+  )
 
   const status = ref<ChatStatus>('ready')
   const error = ref<Error | null>(null)
@@ -40,40 +40,28 @@ export function useN8nChat(options: UseN8nChatOptions) {
     existingUserMessage?: FlexiMessage
   }) => {
     const normalizedText = options.text.trim()
-    if (!normalizedText || status.value !== 'ready') {
-      return
-    }
+    if (!normalizedText || status.value !== 'ready') return
 
     error.value = null
 
+    // Add user message
     const userMessage = options.existingUserMessage ?? createUserMessage(normalizedText)
     if (!options.existingUserMessage) {
       messages.value = [...messages.value, userMessage]
     }
 
-    // Create assistant message placeholder
+    // Create assistant placeholder
     const assistantMessage = createAssistantMessage()
     messages.value = [...messages.value, assistantMessage]
     const textPart = findTextPart(assistantMessage)
-    textPart.state = 'waiting' // Start with waiting state
-
-    console.log('🔵 Estado inicial da mensagem:', {
-      state: textPart.state,
-      messageId: assistantMessage.id,
-      parts: assistantMessage.parts
-    })
 
     status.value = 'streaming'
     abortController.value = new AbortController()
 
     try {
-      // Call the server API endpoint which proxies to n8n
-      // The server will persist both user and assistant messages
       const response = await fetch(`/api/chats/${chatId}/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: normalizedText,
           persistUserMessage: options.persistUserMessage
@@ -83,25 +71,22 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
       if (!response.ok || !response.body) {
         const errorText = await safeReadBody(response)
-        throw new Error(errorText || `Erro: ${response.status} ${response.statusText}`)
+        throw new Error(errorText || `Error: ${response.status} ${response.statusText}`)
       }
 
-      // Process streaming response
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
+
       let buffer = ''
-      let rawBuffer = ''
+      let rawContent = ''
       const seenArtifacts = new Set<string>()
-      let isFirstContent = true
+      let hasReceivedContent = false
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        // Decode chunk
         buffer += decoder.decode(value, { stream: true })
-
-        // Process lines
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
@@ -112,43 +97,35 @@ export function useN8nChat(options: UseN8nChatOptions) {
             const parsed = JSON.parse(line)
 
             if (parsed.type === 'item' && parsed.content) {
-              const content = parsed.content.trim()
+              const content = parsed.content
 
-              // Skip BBCode opening tags and empty content
-              if (content === '[' || content === 'bbcode' || content === ']' ||
-                content === '[bbcode]' || content === 'bbcode]' ||
-                content === '/bbcode' || content === '[/bbcode]' || !content) {
-                continue
+              // Skip artifact tag tokens during streaming
+              if (isArtifactToken(content)) continue
+
+              if (!hasReceivedContent) {
+                hasReceivedContent = true
+                textPart.state = 'streaming'
               }
 
-              // Only mark as not first content when we actually add real content
-              if (isFirstContent && content) {
-                isFirstContent = false
-                // Change from waiting to streaming when first real content arrives
-                if (textPart.state === 'waiting') {
-                  textPart.state = 'streaming'
-                }
-              }
+              rawContent += content
 
-              rawBuffer += parsed.content
+              // Extract artifacts and update text
+              const { cleanedText, artifacts } = extractArtifacts(rawContent)
+              textPart.text = cleanedText
 
-              // Update content and FORCE Vue reactivity
-              const { cleanedText, artifacts } = extractArtifacts(rawBuffer)
-              textPart.text = bbcodeToMarkdown(cleanedText)
-
-              // Handle new artifacts
-              artifacts.forEach((artifact: ArtifactUIPart) => {
+              // Add new artifacts
+              for (const artifact of artifacts) {
                 if (!seenArtifacts.has(artifact.id)) {
                   seenArtifacts.add(artifact.id)
                   assistantMessage.parts.push({ ...artifact })
                 }
-              })
+              }
 
-              // CRITICAL: Force Vue reactivity by creating new array reference
+              // Force reactivity
               messages.value = [...messages.value]
             }
-          } catch (e) {
-            console.error('Erro ao processar linha:', line, e)
+          } catch {
+            // Ignore malformed JSON
           }
         }
       }
@@ -157,39 +134,31 @@ export function useN8nChat(options: UseN8nChatOptions) {
       if (buffer.trim()) {
         try {
           const parsed = JSON.parse(buffer)
-          if (parsed.type === 'item' && parsed.content) {
-            if (!isFirstContent || (parsed.content.trim() !== '[' && parsed.content.trim() !== 'bbcode' && parsed.content.trim() !== ']')) {
-              rawBuffer += parsed.content
+          if (parsed.type === 'item' && parsed.content && !isArtifactToken(parsed.content)) {
+            rawContent += parsed.content
+            const { cleanedText, artifacts } = extractArtifacts(rawContent)
+            textPart.text = cleanedText
 
-              const { cleanedText, artifacts } = extractArtifacts(rawBuffer)
-              textPart.text = bbcodeToMarkdown(cleanedText)
-
-              artifacts.forEach((artifact: ArtifactUIPart) => {
-                if (!seenArtifacts.has(artifact.id)) {
-                  seenArtifacts.add(artifact.id)
-                  assistantMessage.parts.push({ ...artifact })
-                }
-              })
-
-              messages.value = [...messages.value]
+            for (const artifact of artifacts) {
+              if (!seenArtifacts.has(artifact.id)) {
+                seenArtifacts.add(artifact.id)
+                assistantMessage.parts.push({ ...artifact })
+              }
             }
+            messages.value = [...messages.value]
           }
-        } catch (e) {
-          console.error('Erro ao processar buffer final:', e)
+        } catch {
+          // Ignore
         }
       }
 
-      // If no message received
-      if (!rawBuffer) {
-        textPart.text = 'Desculpe, não recebi uma resposta válida.'
-        messages.value = [...messages.value]
+      // Fallback if no content received
+      if (!rawContent) {
+        textPart.text = 'Sorry, I couldn\'t process that request. Please try again.'
       }
 
       textPart.state = 'done'
       status.value = 'ready'
-
-      // Note: Assistant message is already saved by the server endpoint
-      // No need to persist here to avoid duplication
 
       await refreshNuxtData('chats')
     } catch (err) {
@@ -199,7 +168,7 @@ export function useN8nChat(options: UseN8nChatOptions) {
         return
       }
 
-      error.value = err instanceof Error ? err : new Error('Erro ao enviar mensagem.')
+      error.value = err instanceof Error ? err : new Error('Failed to send message.')
       textPart.text = error.value.message
       textPart.state = 'done'
       status.value = 'ready'
@@ -215,23 +184,19 @@ export function useN8nChat(options: UseN8nChatOptions) {
     })
   }
 
+  // Bootstrap pending messages
   const shouldBootstrapPending = Boolean(
-    initialMessages &&
-    initialMessages.length > 0 &&
+    initialMessages?.length &&
     initialMessages[initialMessages.length - 1]?.role === 'user'
   )
 
   if (import.meta.client && shouldBootstrapPending) {
     setTimeout(() => {
       const pendingMessage = findPendingUserMessage(messages.value)
-      if (!pendingMessage) {
-        return
-      }
+      if (!pendingMessage) return
 
       const pendingText = getTextFromParts(pendingMessage.parts).trim()
-      if (!pendingText) {
-        return
-      }
+      if (!pendingText) return
 
       streamMessage({
         text: pendingText,
@@ -242,15 +207,13 @@ export function useN8nChat(options: UseN8nChatOptions) {
   }
 
   const stop = () => {
-    if (abortController.value) {
-      abortController.value.abort()
-      abortController.value = null
-    }
+    abortController.value?.abort()
+    abortController.value = null
 
     // Mark last assistant message as done
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const message = messages.value[i]
-      if (message && message.role === 'assistant') {
+      if (message?.role === 'assistant') {
         const textPart = findTextPart(message)
         textPart.state = 'done'
         break
@@ -269,14 +232,12 @@ export function useN8nChat(options: UseN8nChatOptions) {
   }
 }
 
+// Helper functions
 function createUserMessage(text: string): FlexiMessage {
   return {
     id: generateMessageId(),
     role: 'user',
-    parts: [{
-      type: 'text',
-      text
-    }]
+    parts: [{ type: 'text', text }]
   }
 }
 
@@ -284,16 +245,12 @@ function createAssistantMessage(): FlexiMessage {
   return {
     id: generateMessageId(),
     role: 'assistant',
-    parts: [{
-      type: 'text',
-      text: '',
-      state: 'waiting' // Start with waiting state
-    }]
+    parts: [{ type: 'text', text: '', state: 'waiting' }]
   }
 }
 
 function findTextPart(message: FlexiMessage): MutableTextPart {
-  const part = message.parts.find((part: FlexiMessage['parts'][number]) => part.type === 'text')
+  const part = message.parts.find(p => p.type === 'text')
   if (part && 'text' in part) {
     return part as MutableTextPart
   }
@@ -304,50 +261,38 @@ function findTextPart(message: FlexiMessage): MutableTextPart {
 }
 
 function findPendingUserMessage(items: FlexiMessage[]): FlexiMessage | null {
-  if (!items.length) {
-    return null
-  }
-
+  if (!items.length) return null
   const last = items[items.length - 1]
   return last?.role === 'user' ? last : null
 }
 
 function getTextFromParts(parts: FlexiMessage['parts']): string {
-  if (!Array.isArray(parts)) {
-    return ''
-  }
+  if (!Array.isArray(parts)) return ''
 
   return parts
-    .map((part) => {
-      if (part && typeof part === 'object' && 'text' in part) {
-        const value = (part as Record<string, unknown>).text
-        return typeof value === 'string' ? value : ''
-      }
-      return ''
-    })
+    .filter((part): part is { type: 'text'; text: string } =>
+      part?.type === 'text' && 'text' in part
+    )
+    .map(part => part.text)
     .filter(Boolean)
     .join('\n')
 }
 
-function generateMessageId() {
+function generateMessageId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
-
   return `msg_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function isAbortError(error: unknown) {
-  const isDomAbort = typeof DOMException !== 'undefined'
-    && error instanceof DOMException
-    && error.name === 'AbortError'
-
-  const isGenericAbort = error instanceof Error && error.name === 'AbortError'
-
-  return isDomAbort || isGenericAbort
+function isAbortError(error: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
 }
 
-async function safeReadBody(response: Response) {
+async function safeReadBody(response: Response): Promise<string> {
   try {
     return await response.text()
   } catch {
@@ -355,4 +300,13 @@ async function safeReadBody(response: Response) {
   }
 }
 
+// Skip streaming artifact tag tokens
+const ARTIFACT_TOKENS = new Set([
+  '[', ']', 'artifact', '[artifact', 'artifact]',
+  '/artifact', '[/artifact', '/artifact]', '[/artifact]'
+])
 
+function isArtifactToken(content: string): boolean {
+  const trimmed = content.trim()
+  return ARTIFACT_TOKENS.has(trimmed) || trimmed.startsWith('[artifact ')
+}

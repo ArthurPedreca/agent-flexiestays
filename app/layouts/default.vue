@@ -1,10 +1,27 @@
 <script setup lang="ts">
-import { LazyModalConfirm } from "#components";
+import { LazyModalConfirm, LazyModalLogin } from "#components";
 
 const route = useRoute();
 const toast = useToast();
 const overlay = useOverlay();
-const { loggedIn, openInPopup } = useUserSession();
+const { loggedIn } = useUserSession();
+const { isAuthenticated, initAuth } = useAuth();
+
+// Initialize auth on mount
+onMounted(async () => {
+  await initAuth();
+});
+
+const loginModal = overlay.create(LazyModalLogin, {});
+
+async function openLoginModal() {
+  const instance = loginModal.open();
+  const result = await instance.result;
+  if (result) {
+    // Refresh chats after successful login
+    refreshChats();
+  }
+}
 
 const open = ref(false);
 
@@ -151,15 +168,15 @@ defineShortcuts({
       </template>
 
       <template #footer="{ collapsed }">
-        <UserMenu v-if="loggedIn" :collapsed="collapsed" />
+        <UserMenu v-if="loggedIn || isAuthenticated" :collapsed="collapsed" />
         <UButton
           v-else
-          :label="collapsed ? '' : 'Login with GitHub'"
-          icon="i-simple-icons-github"
+          :label="collapsed ? '' : 'Login'"
+          icon="i-lucide-log-in"
           color="neutral"
           variant="ghost"
           class="w-full"
-          @click="openInPopup('/auth/github')"
+          @click="openLoginModal"
         />
       </template>
     </UDashboardSidebar>

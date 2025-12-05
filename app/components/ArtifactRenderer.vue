@@ -13,194 +13,236 @@ interface CarouselItem {
   description?: string
   image?: string
   tags?: string[]
+  price?: string | number
+  details?: Record<string, string | number>
   actions?: CarouselAction[]
+}
+
+interface CardData {
+  id?: string
+  title?: string
+  subtitle?: string
+  description?: string
+  image?: string
+  tags?: string[]
+  price?: string | number
+  details?: Record<string, string | number>
+  actions?: CarouselAction[]
+}
+
+interface ImageData {
+  src?: string
+  alt?: string
+  caption?: string
 }
 
 const props = defineProps<{ artifact: ArtifactUIPart }>()
 
 const isPending = computed(() => props.artifact.state === 'streaming')
-const isCarousel = computed(() => props.artifact.artifactType === 'carousel')
-const isMap = computed(() => props.artifact.artifactType === 'map')
 
+// Type checkers
+const isCarousel = computed(() => props.artifact.artifactType === 'carousel')
+const isCard = computed(() => props.artifact.artifactType === 'card')
+const isImage = computed(() => props.artifact.artifactType === 'image')
+
+// Data extractors
 const carouselItems = computed<CarouselItem[]>(() => {
-  const rawItems = props.artifact.data ? props.artifact.data['items'] : undefined
-  return Array.isArray(rawItems) ? rawItems as CarouselItem[] : []
+  const rawItems = props.artifact.data?.items
+  return Array.isArray(rawItems) ? rawItems : []
 })
 
-const mapInfo = computed(() => normalizeMapData(props.artifact.data))
-const mapLink = computed(() => mapInfo.value ? getMapLink(mapInfo.value.lat, mapInfo.value.lng) : null)
-const formattedData = computed(() => JSON.stringify(props.artifact.data ?? {}, null, 2))
+const cardData = computed<CardData>(() => {
+  return props.artifact.data as CardData ?? {}
+})
+
+const imageData = computed<ImageData>(() => {
+  return props.artifact.data as ImageData ?? {}
+})
+
 const title = computed(() => props.artifact.title ?? getFallbackTitle(props.artifact.artifactType))
+const formattedData = computed(() => JSON.stringify(props.artifact.data ?? {}, null, 2))
+
+function getFallbackTitle(type: string): string {
+  const titles: Record<string, string> = {
+    carousel: 'Property Suggestions',
+    card: 'Property Details',
+    image: 'Image',
+    map: 'Location'
+  }
+  return titles[type] ?? 'Information'
+}
+
+function formatPrice(price: string | number | undefined): string {
+  if (!price) return ''
+  if (typeof price === 'number') return `£${price}`
+  return price
+}
 </script>
 
 <template>
-  <div class="space-y-4 rounded-2xl border border-default bg-muted/20 p-4 shadow-sm">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div class="space-y-1">
-        <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Artifact
-        </p>
-        <p class="text-base font-semibold text-foreground">
-          {{ title }}
-        </p>
-        <p v-if="artifact.description" class="text-sm text-muted-foreground">
-          {{ artifact.description }}
-        </p>
-      </div>
-      <UBadge
-        v-if="artifact.artifactType"
-        color="primary"
-        variant="soft"
-        class="uppercase tracking-wide"
-      >
-        {{ artifact.artifactType }}
-      </UBadge>
+  <div class="my-4 space-y-3">
+    <!-- Header -->
+    <div v-if="title || artifact.description" class="flex items-center gap-2">
+      <UIcon 
+        :name="isCarousel ? 'i-lucide-layout-grid' : isCard ? 'i-lucide-square' : isImage ? 'i-lucide-image' : 'i-lucide-box'"
+        class="size-4 text-primary"
+      />
+      <span class="text-sm font-medium text-muted-foreground">{{ title }}</span>
     </div>
 
-    <USkeleton v-if="isPending" class="h-32 w-full rounded-xl" />
+    <!-- Loading state -->
+    <USkeleton v-if="isPending" class="h-48 w-full rounded-xl" />
 
-    <template v-else>
-      <div v-if="isCarousel" class="grid gap-3 md:grid-cols-2">
-        <div
-          v-for="(item, index) in carouselItems"
-          :key="item.id ?? `${artifact.id}-carousel-${index}`"
-          class="flex h-full flex-col gap-3 rounded-xl border border-default bg-background/90 p-4"
-        >
+    <!-- CAROUSEL: Multiple properties -->
+    <div v-else-if="isCarousel && carouselItems.length" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-for="(item, index) in carouselItems"
+        :key="item.id ?? `carousel-${index}`"
+        class="group flex flex-col overflow-hidden rounded-xl border border-default bg-elevated transition-shadow hover:shadow-lg"
+      >
+        <!-- Image -->
+        <div v-if="item.image" class="relative aspect-video overflow-hidden">
           <img
-            v-if="item.image"
             :src="item.image"
-            :alt="item.title ?? 'Imagem do item'"
-            class="h-40 w-full rounded-lg object-cover"
+            :alt="item.title ?? 'Property image'"
+            class="h-full w-full object-cover transition-transform group-hover:scale-105"
           >
+          <div v-if="item.price" class="absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-sm font-semibold text-white">
+            {{ formatPrice(item.price) }}/night
+          </div>
+        </div>
 
-          <div class="space-y-1">
-            <p class="text-sm font-semibold">
-              {{ item.title ?? `Item ${index + 1}` }}
-            </p>
-            <p v-if="item.subtitle" class="text-xs uppercase text-muted-foreground">
-              {{ item.subtitle }}
-            </p>
-            <p v-if="item.description" class="text-sm text-muted-foreground">
-              {{ item.description }}
-            </p>
+        <!-- Content -->
+        <div class="flex flex-1 flex-col gap-2 p-4">
+          <div>
+            <h4 class="font-semibold text-foreground line-clamp-1">{{ item.title ?? `Property ${index + 1}` }}</h4>
+            <p v-if="item.subtitle" class="text-xs text-muted-foreground">{{ item.subtitle }}</p>
           </div>
 
-          <div v-if="item.tags?.length" class="flex flex-wrap gap-2">
+          <p v-if="item.description" class="text-sm text-muted-foreground line-clamp-2">
+            {{ item.description }}
+          </p>
+
+          <!-- Tags -->
+          <div v-if="item.tags?.length" class="flex flex-wrap gap-1.5">
             <UBadge
-              v-for="tag in item.tags"
+              v-for="tag in item.tags.slice(0, 4)"
               :key="tag"
               size="xs"
               variant="soft"
+              color="neutral"
             >
               {{ tag }}
             </UBadge>
           </div>
 
-          <div v-if="item.actions?.length" class="mt-auto flex flex-wrap gap-2">
+          <!-- Actions -->
+          <div v-if="item.actions?.length" class="mt-auto flex gap-2 pt-2">
             <UButton
-              v-for="(action, actionIndex) in item.actions"
-              :key="action.url ?? actionIndex"
+              v-for="(action, actionIdx) in item.actions"
+              :key="action.url ?? actionIdx"
               :to="action.url"
               size="xs"
               variant="soft"
               color="primary"
               target="_blank"
-              icon="i-lucide-arrow-up-right"
             >
-              {{ action.label ?? 'Abrir' }}
+              {{ action.label ?? 'View' }}
             </UButton>
           </div>
         </div>
       </div>
+    </div>
 
-      <div v-else-if="isMap" class="space-y-3">
-        <div class="rounded-xl border border-default bg-background/90 p-4">
-          <p class="text-sm font-medium text-foreground">
-            {{ mapInfo?.label ?? 'Localização sugerida' }}
+    <!-- CARD: Single property highlight -->
+    <div 
+      v-else-if="isCard && cardData"
+      class="overflow-hidden rounded-xl border border-default bg-elevated shadow-sm"
+    >
+      <div class="flex flex-col sm:flex-row">
+        <!-- Image -->
+        <div v-if="cardData.image" class="relative sm:w-2/5">
+          <img
+            :src="cardData.image"
+            :alt="cardData.title ?? 'Property image'"
+            class="h-48 w-full object-cover sm:h-full"
+          >
+          <div v-if="cardData.price" class="absolute bottom-3 left-3 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-bold text-white">
+            {{ formatPrice(cardData.price) }}/night
+          </div>
+        </div>
+
+        <!-- Content -->
+        <div class="flex flex-1 flex-col gap-3 p-5">
+          <div>
+            <h3 class="text-lg font-bold text-foreground">{{ cardData.title ?? 'Property' }}</h3>
+            <p v-if="cardData.subtitle" class="text-sm text-muted-foreground">{{ cardData.subtitle }}</p>
+          </div>
+
+          <p v-if="cardData.description" class="text-sm text-muted-foreground">
+            {{ cardData.description }}
           </p>
-          <p class="text-xs text-muted-foreground">
-            {{ formatCoordinates(mapInfo?.lat, mapInfo?.lng) }}
-          </p>
-          <p v-if="mapInfo?.address" class="text-sm text-muted-foreground">
-            {{ mapInfo.address }}
-          </p>
-          <div v-if="mapLink" class="mt-3">
-            <UButton
-              :to="mapLink"
-              target="_blank"
-              size="xs"
+
+          <!-- Tags -->
+          <div v-if="cardData.tags?.length" class="flex flex-wrap gap-2">
+            <UBadge
+              v-for="tag in cardData.tags"
+              :key="tag"
+              size="sm"
               variant="soft"
               color="primary"
-              icon="i-lucide-map"
             >
-              Abrir no mapa
+              {{ tag }}
+            </UBadge>
+          </div>
+
+          <!-- Details grid -->
+          <div v-if="cardData.details && Object.keys(cardData.details).length" class="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-3 text-sm">
+            <div v-for="(value, key) in cardData.details" :key="key" class="flex flex-col">
+              <span class="text-xs text-muted-foreground capitalize">{{ key }}</span>
+              <span class="font-medium">{{ value }}</span>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div v-if="cardData.actions?.length" class="mt-auto flex flex-wrap gap-2 pt-2">
+            <UButton
+              v-for="(action, idx) in cardData.actions"
+              :key="action.url ?? idx"
+              :to="action.url"
+              :variant="idx === 0 ? 'solid' : 'outline'"
+              :color="idx === 0 ? 'primary' : 'neutral'"
+              size="sm"
+              target="_blank"
+            >
+              {{ action.label ?? 'View' }}
             </UButton>
           </div>
         </div>
-        <div class="h-52 rounded-xl border border-dashed border-default bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-          Visualização interativa do mapa poderá ser exibida aqui no futuro.
-        </div>
       </div>
+    </div>
 
-      <div v-else class="rounded-xl border border-dashed border-default bg-background/80">
-        <pre class="max-h-80 overflow-auto rounded-xl p-4 text-xs text-muted-foreground">
-{{ formattedData }}
-        </pre>
-      </div>
-    </template>
+    <!-- IMAGE: Single image with caption -->
+    <figure 
+      v-else-if="isImage && imageData.src"
+      class="overflow-hidden rounded-xl border border-default"
+    >
+      <img
+        :src="imageData.src"
+        :alt="imageData.alt ?? 'Image'"
+        class="w-full object-cover"
+      >
+      <figcaption v-if="imageData.caption" class="bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+        {{ imageData.caption }}
+      </figcaption>
+    </figure>
+
+    <!-- FALLBACK: Unknown artifact type -->
+    <div v-else class="rounded-xl border border-dashed border-default bg-muted/20 p-4">
+      <p class="mb-2 text-xs text-muted-foreground">
+        Artifact: {{ artifact.artifactType }}
+      </p>
+      <pre class="max-h-40 overflow-auto text-xs text-muted-foreground">{{ formattedData }}</pre>
+    </div>
   </div>
 </template>
-
-<script lang="ts">
-function getFallbackTitle(type: string) {
-  switch (type) {
-    case 'carousel':
-      return 'Sugestões do agente'
-    case 'map':
-      return 'Localização recomendada'
-    default:
-      return 'Informação do agente'
-  }
-}
-
-interface MapInfo {
-  lat: number
-  lng: number
-  label?: string
-  address?: string
-}
-
-function normalizeMapData(data: Record<string, unknown> | undefined): MapInfo | null {
-  if (!data) return null
-  const lat = getNumber(data['lat'] ?? data['latitude'])
-  const lng = getNumber(data['lng'] ?? data['longitude'] ?? data['lon'])
-
-  if (lat === null || lng === null) {
-    return null
-  }
-
-  return {
-    lat,
-    lng,
-    label: typeof data['label'] === 'string' ? data['label'] as string : undefined,
-    address: typeof data['address'] === 'string' ? data['address'] as string : undefined
-  }
-}
-
-function getNumber(value: unknown) {
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function getMapLink(lat: number, lng: number) {
-  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=14/${lat}/${lng}`
-}
-
-function formatCoordinates(lat?: number, lng?: number) {
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    return 'Coordenadas indisponíveis'
-  }
-
-  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
-}
-</script>

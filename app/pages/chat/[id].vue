@@ -5,6 +5,7 @@ import type { UIMessage } from "ai";
 import { useClipboard } from "@vueuse/core";
 import { getTextFromMessage } from "@nuxt/ui/utils/ai";
 import ProseStreamPre from "../../components/prose/PreStream.vue";
+import { LazyModalMessageLimit, LazyModalLogin } from "#components";
 
 const components = {
   pre: ProseStreamPre as unknown as DefineComponent,
@@ -12,6 +13,34 @@ const components = {
 
 const route = useRoute();
 const toast = useToast();
+const overlay = useOverlay();
+const { isAuthenticated } = useAuth();
+
+// Message limit for unauthenticated users
+const MESSAGE_LIMIT = 5;
+const userMessageCount = ref(0);
+const showMessageLimitReached = ref(false);
+
+// Create modals
+const messageLimitModal = overlay.create(LazyModalMessageLimit, {});
+const loginModal = overlay.create(LazyModalLogin, {});
+
+async function openMessageLimitModal() {
+  const instance = messageLimitModal.open();
+  const shouldOpenLogin = await instance.result;
+  if (shouldOpenLogin) {
+    openLoginModal();
+  }
+}
+
+async function openLoginModal() {
+  const instance = loginModal.open();
+  const result = await instance.result;
+  if (result) {
+    // User logged in successfully, reset the limit
+    showMessageLimitReached.value = false;
+  }
+}
 const clipboard = useClipboard();
 
 interface ChatMessage {
@@ -46,6 +75,12 @@ const input = ref("");
 const initialMessages = (data.value.messages ??
   []) as unknown as FlexiMessage[];
 
+// Count existing user messages for the limit
+const existingUserMessageCount = initialMessages.filter(
+  (m) => m.role === "user"
+).length;
+userMessageCount.value = existingUserMessageCount;
+
 const { messages, status, error, sendMessage, stop } = useN8nChat({
   chatId: data.value.id,
   initialMessages,
@@ -63,6 +98,17 @@ function handleSubmit(e: Event) {
   e.preventDefault();
   if (!input.value.trim()) {
     return;
+  }
+
+  // Check message limit for unauthenticated users
+  if (!isAuthenticated.value) {
+    userMessageCount.value++;
+
+    if (userMessageCount.value >= MESSAGE_LIMIT) {
+      showMessageLimitReached.value = true;
+      openMessageLimitModal();
+      return;
+    }
   }
 
   sendMessage(input.value);
@@ -143,7 +189,11 @@ watch(error, (value) => {
                 />
                 <!-- Show loading dots when waiting for first response -->
                 <LoadingDots
-                  v-else-if="part.type === 'text' && 'state' in part && part.state === 'waiting'"
+                  v-else-if="
+                    part.type === 'text' &&
+                    'state' in part &&
+                    part.state === 'waiting'
+                  "
                 />
                 <!-- Show text content when streaming or done -->
                 <MDCCached
@@ -155,9 +205,7 @@ watch(error, (value) => {
                   class="*:first:mt-0 *:last:mb-0"
                 />
                 <!-- Empty state fallback for text parts without content -->
-                <LoadingDots
-                  v-else-if="part.type === 'text' && !part.text"
-                />
+                <LoadingDots v-else-if="part.type === 'text' && !part.text" />
                 <ToolWeather
                   v-else-if="part.type === 'tool-weather'"
                   :invocation="(part as WeatherUIToolInvocation)"
@@ -186,9 +234,7 @@ watch(error, (value) => {
             <div class="flex items-center gap-2 text-xs text-muted-foreground">
               <UIcon name="i-lucide-workflow" class="h-4 w-4 text-primary" />
               <span>
-                {{
-                  status !== "ready" ? "Agente respondendo…" : "Agente pronto"
-                }}
+                {{ status !== "ready" ? "Agent responding…" : "Agent ready" }}
               </span>
             </div>
 
@@ -203,4 +249,3 @@ watch(error, (value) => {
     </template>
   </UDashboardPanel>
 </template>
-

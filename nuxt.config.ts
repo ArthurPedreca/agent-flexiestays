@@ -7,8 +7,12 @@ export default defineNuxtConfig({
     '@nuxt/ui',
     '@nuxtjs/mdc',
     'nuxt-auth-utils',
-    'nuxt-charts'
+    'nuxt-charts',
+    '@pinia/nuxt'
   ],
+  pinia: {
+    storesDirs: ['./app/stores/**']
+  },
   devtools: {
     enabled: true
   },
@@ -31,6 +35,7 @@ export default defineNuxtConfig({
       openAPI: true
     }
   },
+
   eslint: {
     config: {
       stylistic: {
@@ -48,7 +53,9 @@ export default defineNuxtConfig({
       n8nWebhookUrl: process.env.NUXT_PUBLIC_N8N_WEBHOOK_URL
         || process.env.N8N_WEBHOOK_URL
         || defaultN8nWebhook,
-      n8nTitleWebhookUrl: process.env.NUXT_PUBLIC_N8N_TITLE_WEBHOOK_URL || ''
+      n8nTitleWebhookUrl: process.env.NUXT_PUBLIC_N8N_TITLE_WEBHOOK_URL || '',
+      flexiestaysApiUrl: process.env.NUXT_PUBLIC_FLEXIESTAYS_API_URL,
+      recaptchaSiteKey: process.env.NUXT_PUBLIC_RECAPTCHA_SITE_KEY
     }
   }
 })

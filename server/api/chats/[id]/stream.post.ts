@@ -2,14 +2,10 @@ import { z } from 'zod'
 import { parseRichContent } from '../../../../shared/utils'
 import { useDrizzle, tables, eq, and } from '../../../database/drizzle'
 
+// Tokens to skip during streaming (artifact tag fragments)
 const STREAM_SKIP_TOKENS = new Set([
-  '[',
-  ']',
-  'bbcode',
-  '[bbcode]',
-  'bbcode]',
-  '/bbcode',
-  '[/bbcode]'
+  '[', ']', 'artifact', '[artifact', 'artifact]',
+  '/artifact', '[/artifact', '/artifact]', '[/artifact]'
 ])
 
 defineRouteMeta({
@@ -62,6 +58,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  // Persist user message
   if (shouldPersistUserMessage) {
     await db.insert(tables.messages).values({
       chatId: id,
@@ -70,6 +67,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  // Update chat title if needed
   const firstUserMessage = chat.messages.find(msg => msg.role === 'user')
   const titleSource = firstUserMessage
     ? flattenMessageParts(firstUserMessage.parts)
@@ -94,19 +92,14 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const historyBase = chat.messages.map(message => ({
-    role: message.role,
-    content: flattenMessageParts(message.parts)
+  // Build conversation history
+  const historyBase = chat.messages.map(msg => ({
+    role: msg.role,
+    content: flattenMessageParts(msg.parts)
   }))
 
   const history = shouldPersistUserMessage
-    ? [
-      ...historyBase,
-      {
-        role: 'user',
-        content: message
-      }
-    ]
+    ? [...historyBase, { role: 'user', content: message }]
     : historyBase
 
   try {
@@ -121,7 +114,8 @@ export default defineEventHandler(async (event) => {
         message,
         history,
         userId,
-        username: session.user?.username || 'User'
+        username: session.user?.username || 'User',
+        userToken: getCookie(event, 'flexiestays_token') || null
       })
     })
 
@@ -134,6 +128,7 @@ export default defineEventHandler(async (event) => {
       })
     }
 
+    // Set streaming headers
     setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
     setHeader(event, 'Cache-Control', 'no-cache, no-transform')
     setHeader(event, 'Connection', 'keep-alive')
@@ -154,13 +149,12 @@ export default defineEventHandler(async (event) => {
 
     const processLine = (rawLine: string) => {
       const line = rawLine.trim()
-      if (!line) {
-        return
-      }
+      if (!line) return
 
       try {
         const parsed = JSON.parse(line)
         const content = typeof parsed?.content === 'string' ? parsed.content : ''
+
         if (parsed?.type === 'item' && content) {
           const normalized = content.trim()
           if (!STREAM_SKIP_TOKENS.has(normalized)) {
@@ -168,12 +162,13 @@ export default defineEventHandler(async (event) => {
           }
         }
       } catch {
-        // Ignore malformed JSON lines
+        // Ignore malformed JSON
       }
     }
 
     const flushJsonBuffer = (flushAll = false) => {
       let newlineIndex = jsonBuffer.indexOf('\n')
+
       while (newlineIndex !== -1) {
         const line = jsonBuffer.slice(0, newlineIndex)
         jsonBuffer = jsonBuffer.slice(newlineIndex + 1)
@@ -205,6 +200,7 @@ export default defineEventHandler(async (event) => {
             controller.enqueue(value)
           }
 
+          // Parse final content and save assistant message
           const parsed = parseRichContent(assistantText.trim())
           const assistantParts: Array<Record<string, unknown>> = []
 
@@ -241,7 +237,6 @@ export default defineEventHandler(async (event) => {
     return sendStream(event, stream)
   } catch (error) {
     console.error('n8n integration error:', error)
-
     const messageText = error instanceof Error ? error.message : 'Unknown error'
 
     throw createError({
@@ -292,24 +287,20 @@ async function maybeUpdateChatTitle(options: {
     .where(eq(tables.chats.id, options.chatId))
 }
 
-function buildTitleFromMessage(message: string) {
+function buildTitleFromMessage(message: string): string {
   const normalized = message.trim().replace(/\s+/g, ' ')
-  if (!normalized) {
-    return 'Nova conversa'
-  }
+  if (!normalized) return 'New conversation'
 
   const slice = normalized.slice(0, 60)
   return normalized.length > 60 ? `${slice}...` : slice
 }
 
 function flattenMessageParts(parts: unknown): string {
-  if (!Array.isArray(parts)) {
-    return ''
-  }
+  if (!Array.isArray(parts)) return ''
 
   return parts
     .map((part) => {
-      if (part && typeof part === 'object' && 'text' in (part as Record<string, unknown>)) {
+      if (part && typeof part === 'object' && 'text' in part) {
         const value = (part as Record<string, unknown>).text
         return typeof value === 'string' ? value : ''
       }

@@ -8,15 +8,15 @@ async function createChat(prompt: string) {
 
   try {
     const chat = await $fetch("/api/chats", {
-      method: 'POST',
-      body: { input: prompt }
-    })
+      method: "POST",
+      body: { input: prompt },
+    });
 
-    refreshNuxtData('chats')
-    navigateTo(`/chat/${chat?.id}`)
+    refreshNuxtData("chats");
+    navigateTo(`/chat/${chat?.id}`);
   } catch (error) {
-    console.error('Error creating chat:', error)
-    loading.value = false
+    console.error("Error creating chat:", error);
+    loading.value = false;
   }
 }
 
@@ -28,20 +28,20 @@ function onSubmit() {
 
 const quickChats = [
   {
-    label: 'Como funciona o FlexiStays?',
-    icon: 'i-lucide-home'
+    label: "How does FlexiStays work?",
+    icon: "i-lucide-home",
   },
   {
-    label: 'Ajude-me a encontrar uma acomodação',
-    icon: 'i-lucide-search'
+    label: "Help me find accommodation",
+    icon: "i-lucide-search",
   },
   {
-    label: 'Quais são as opções de pagamento?',
-    icon: "i-lucide-credit-card"
+    label: "What are the payment options?",
+    icon: "i-lucide-credit-card",
   },
   {
-    label: 'Preciso de ajuda com minha reserva',
-    icon: "i-lucide-calendar"
+    label: "I need help with my booking",
+    icon: "i-lucide-calendar",
   },
 ];
 </script>
@@ -57,7 +57,7 @@ const quickChats = [
         class="flex-1 flex flex-col justify-center gap-4 sm:gap-6 py-8"
       >
         <h1 class="text-3xl sm:text-4xl text-highlighted font-bold">
-          Como posso ajudar você hoje?
+          How can I help you today?
         </h1>
 
         <UChatPrompt

@@ -42,6 +42,36 @@ export function useN8nChat(options: UseN8nChatOptions) {
   const error = ref<Error | null>(null)
   const abortController = ref<AbortController | null>(null)
 
+  // Check if there's a pending user message that needs to be sent to n8n
+  // This happens when creating a new chat - the user message is saved to DB
+  // but hasn't been sent to n8n yet
+  const checkPendingUserMessage = () => {
+    if (!initialMessages?.length) return null
+
+    const lastMessage = initialMessages[initialMessages.length - 1]
+    if (!lastMessage || lastMessage.role !== 'user') return null
+
+    // Only consider it pending if this is a fresh chat with just one user message
+    // This prevents re-sending on page reload after streaming has started
+    const userMessages = initialMessages.filter(m => m.role === 'user')
+    const assistantMessages = initialMessages.filter(m => m.role === 'assistant')
+
+    // If there's any assistant message, the first user message was already processed
+    if (assistantMessages.length > 0) return null
+
+    // Only auto-send if there's exactly one user message with no assistant response
+    if (userMessages.length !== 1) return null
+
+    // Get the text from the user message
+    const textPart = lastMessage.parts?.find(p => p.type === 'text' && 'text' in p)
+    if (!textPart || !('text' in textPart)) return null
+
+    return {
+      message: lastMessage,
+      text: textPart.text as string
+    }
+  }
+
   const streamMessage = async (options: {
     text: string
     persistUserMessage: boolean
@@ -198,11 +228,20 @@ export function useN8nChat(options: UseN8nChatOptions) {
     })
   }
 
-  // Bootstrap pending messages - DISABLED
-  // This was causing messages to be re-sent on page reload.
-  // Messages are now persisted in the database and loaded on page load.
-  // If you need to resume incomplete responses, implement a proper
-  // "pending" state in the database instead.
+  // Bootstrap: send pending user message to n8n
+  // This happens when creating a new chat - the user message is saved to DB
+  // but hasn't been sent to n8n yet
+  const pendingUserMessage = checkPendingUserMessage()
+  if (pendingUserMessage) {
+    // Use nextTick to ensure the component is mounted before streaming
+    nextTick(() => {
+      streamMessage({
+        text: pendingUserMessage.text,
+        persistUserMessage: false, // Already persisted in DB
+        existingUserMessage: pendingUserMessage.message
+      })
+    })
+  }
 
   const stop = () => {
     abortController.value?.abort()
@@ -509,21 +548,40 @@ function cleanRouterJson(content: string): string {
  * Normalizes initial messages loaded from the database.
  * - Cleans router JSON from text
  * - Extracts tool calls and converts them to tool parts
+ * - Detects raw JSON that should be a tool
  * - Sets state to 'done' for all text parts
+ * - Normalizes tool parts to ensure consistent format
  */
 function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
-  return messages.map(message => {
+  console.log('[normalizeInitialMessages] Input:', messages.length, 'messages')
+
+  return messages.map((message, msgIdx) => {
     const newParts: FlexiMessagePart[] = []
 
+    console.log(`[normalizeInitialMessages] Message ${msgIdx} (${message.role}):`, message.parts?.length, 'parts')
+
     for (const part of message.parts) {
+      console.log(`[normalizeInitialMessages] Part type: ${(part as any).type}`)
+
+      // Handle text parts - may contain embedded tool tags or raw JSON
       if (part.type === 'text' && 'text' in part && typeof part.text === 'string') {
+        console.log(`[normalizeInitialMessages] Text part, length: ${part.text.length}`)
+        console.log(`[normalizeInitialMessages] Text preview: ${part.text.substring(0, 200)}`)
+
         // Clean router JSON first
         const cleanedContent = cleanRouterJson(part.text)
 
-        // Extract tools from the content
-        const { text: finalText, tools } = extractToolCalls(cleanedContent)
+        // Extract tools from [tool:] tags
+        const { text: afterToolExtract, tools } = extractToolCalls(cleanedContent)
 
-        // Add the cleaned text part
+        console.log(`[normalizeInitialMessages] After extractToolCalls: ${tools.length} tools found`)
+
+        // Extract embedded JSON tools (without [tool:] wrapper)
+        const { tools: embeddedTools, cleanedText: finalText } = extractEmbeddedToolJson(afterToolExtract)
+
+        console.log(`[normalizeInitialMessages] Embedded JSON tools found: ${embeddedTools.length}`)
+
+        // Add the cleaned text part (if any remains)
         if (finalText.trim()) {
           newParts.push({
             type: 'text',
@@ -532,12 +590,34 @@ function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
           })
         }
 
-        // Add extracted tools as separate parts
+        // Add extracted tools from [tool:] tags
         for (const tool of tools) {
+          console.log(`[normalizeInitialMessages] Adding tool from tags: ${tool.type}`)
           newParts.push(tool as unknown as FlexiMessagePart)
         }
-      } else {
-        // Keep non-text parts as-is
+
+        // Add tools detected from embedded JSON
+        for (const tool of embeddedTools) {
+          console.log(`[normalizeInitialMessages] Adding embedded tool: ${tool.type}`)
+          newParts.push(tool as unknown as FlexiMessagePart)
+        }
+      }
+      // Handle tool parts from database - normalize format
+      else if (part.type && typeof part.type === 'string' && part.type.startsWith('tool-')) {
+        console.log(`[normalizeInitialMessages] Tool part from DB: ${part.type}`)
+        // Tool parts from DB have: type, state, output, input, toolCallId
+        // Ensure they have the correct format for the UI components
+        const toolPart = part as unknown as Record<string, unknown>
+        newParts.push({
+          type: toolPart.type as string,
+          state: (toolPart.state as string) || 'output-available',
+          output: toolPart.output as Record<string, unknown> || {},
+          input: toolPart.input as Record<string, unknown> || toolPart.output as Record<string, unknown> || {},
+          toolCallId: (toolPart.toolCallId as string) || `tool-${Date.now()}`
+        } as unknown as FlexiMessagePart)
+      }
+      // Keep other non-text parts as-is (artifacts, etc.)
+      else {
         newParts.push(part)
       }
     }
@@ -551,9 +631,195 @@ function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
       })
     }
 
+    console.log(`[normalizeInitialMessages] Output parts for message ${msgIdx}:`, newParts.map(p => (p as any).type))
+
     return {
       ...message,
       parts: newParts
     }
   })
+}
+
+/**
+ * Extracts embedded JSON from text that looks like a carousel or property card.
+ * The JSON may be embedded in the middle of text, not wrapped in [tool:] tags.
+ * 
+ * Example input:
+ * "Here are some options:\n{"title":"Accommodations","items":[...]}Let me know if you need help"
+ * 
+ * Returns the extracted tool and the remaining text without the JSON.
+ */
+function extractEmbeddedToolJson(text: string): { tools: ExtractedTool[]; cleanedText: string } {
+  const tools: ExtractedTool[] = []
+  let cleanedText = text
+
+  // Pattern to find JSON objects that look like carousel data
+  // Matches {"title":..., "items":[...]} pattern
+  const jsonPattern = /\{"title"\s*:\s*"[^"]*"\s*,\s*"items"\s*:\s*\[[\s\S]*?\]\}/g
+
+  let match: RegExpExecArray | null
+  const matches: Array<{ start: number; end: number; json: string }> = []
+
+  // Find all potential JSON matches
+  while ((match = jsonPattern.exec(text)) !== null) {
+    matches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      json: match[0]
+    })
+  }
+
+  // Process matches in reverse order to preserve indices when removing
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i]!
+
+    try {
+      // Try to parse - may need to extend the match to get complete JSON
+      let jsonStr = m.json
+      let parsed: Record<string, unknown> | null = null
+
+      // Try parsing the basic match first
+      try {
+        parsed = JSON.parse(jsonStr)
+      } catch {
+        // If basic parsing fails, try to find the complete JSON by balancing braces
+        const startIdx = m.start
+        let braceCount = 0
+        let endIdx = startIdx
+        let inString = false
+        let escape = false
+
+        for (let j = startIdx; j < text.length; j++) {
+          const char = text[j]
+
+          if (escape) {
+            escape = false
+            continue
+          }
+
+          if (char === '\\') {
+            escape = true
+            continue
+          }
+
+          if (char === '"' && !escape) {
+            inString = !inString
+            continue
+          }
+
+          if (!inString) {
+            if (char === '{') braceCount++
+            if (char === '}') {
+              braceCount--
+              if (braceCount === 0) {
+                endIdx = j + 1
+                break
+              }
+            }
+          }
+        }
+
+        if (endIdx > startIdx) {
+          jsonStr = text.substring(startIdx, endIdx)
+          try {
+            parsed = JSON.parse(jsonStr)
+            // Update the match end position
+            m.end = endIdx
+            m.json = jsonStr
+          } catch {
+            // Still can't parse, skip this match
+            continue
+          }
+        }
+      }
+
+      if (!parsed) continue
+
+      // Check if this looks like a carousel
+      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+        const firstItem = parsed.items[0] as Record<string, unknown>
+        if (firstItem && (firstItem.title || firstItem.image || firstItem.price)) {
+          tools.push({
+            type: 'tool-carousel',
+            state: 'output-available',
+            output: parsed,
+            input: parsed,
+            toolCallId: generateToolId('carousel', jsonStr)
+          })
+
+          // Remove JSON from text
+          cleanedText = cleanedText.substring(0, m.start) + cleanedText.substring(m.end)
+        }
+      }
+    } catch {
+      // JSON parsing failed, skip
+      continue
+    }
+  }
+
+  // Also check for standalone property card JSON (single property object)
+  const propertyPattern = /\{"id"\s*:\s*"[^"]*"\s*,\s*"title"\s*:\s*"[^"]*"[\s\S]*?"(?:image|price|description)"\s*:[\s\S]*?\}/g
+
+  while ((match = propertyPattern.exec(cleanedText)) !== null) {
+    try {
+      // Find complete JSON by balancing braces
+      const startIdx = match.index
+      let braceCount = 0
+      let endIdx = startIdx
+      let inString = false
+      let escape = false
+
+      for (let j = startIdx; j < cleanedText.length; j++) {
+        const char = cleanedText[j]
+
+        if (escape) {
+          escape = false
+          continue
+        }
+
+        if (char === '\\') {
+          escape = true
+          continue
+        }
+
+        if (char === '"' && !escape) {
+          inString = !inString
+          continue
+        }
+
+        if (!inString) {
+          if (char === '{') braceCount++
+          if (char === '}') {
+            braceCount--
+            if (braceCount === 0) {
+              endIdx = j + 1
+              break
+            }
+          }
+        }
+      }
+
+      if (endIdx > startIdx) {
+        const jsonStr = cleanedText.substring(startIdx, endIdx)
+        const parsed = JSON.parse(jsonStr)
+
+        // Make sure it's not already inside items array
+        if (parsed.title && (parsed.image || parsed.price || parsed.description) && !parsed.items) {
+          tools.push({
+            type: 'tool-property-card',
+            state: 'output-available',
+            output: parsed,
+            input: parsed,
+            toolCallId: generateToolId('property-card', jsonStr)
+          })
+
+          cleanedText = cleanedText.substring(0, startIdx) + cleanedText.substring(endIdx)
+        }
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return { tools, cleanedText: cleanedText.trim() }
 }

@@ -2,11 +2,12 @@ import { z } from 'zod'
 import { parseRichContent } from '../../../../shared/utils'
 import { useDrizzle, tables, eq, and } from '../../../database/drizzle'
 
-// Tokens to skip during streaming (artifact and tool tag fragments)
+// Tokens to skip during streaming
+// Note: We DON'T skip '[' and ']' because they're part of tool tags
+// and filtering them would break tool parsing
 const STREAM_SKIP_TOKENS = new Set([
-  '[', ']', 'artifact', '[artifact', 'artifact]',
-  '/artifact', '[/artifact', '/artifact]', '[/artifact]',
-  'tool', '[tool', 'tool]', '/tool', '[/tool', '/tool]', '[/tool]'
+  'artifact', '[artifact', 'artifact]',
+  '/artifact', '[/artifact', '/artifact]', '[/artifact]'
 ])
 
 defineRouteMeta({
@@ -204,6 +205,14 @@ export default defineEventHandler(async (event) => {
           // Parse final content and save assistant message
           const parsed = parseRichContent(assistantText.trim())
           const assistantParts: Array<Record<string, unknown>> = []
+
+          console.log('[stream.post] Raw assistantText:', assistantText.substring(0, 500))
+          console.log('[stream.post] Parsed result:', {
+            markdownLength: parsed.markdown?.length,
+            artifactsCount: parsed.artifacts?.length,
+            toolsCount: parsed.tools?.length,
+            tools: parsed.tools
+          })
 
           if (parsed.markdown) {
             assistantParts.push({

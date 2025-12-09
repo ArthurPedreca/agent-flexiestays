@@ -66,7 +66,7 @@ function getFallbackTitle(type: string): string {
   const titles: Record<string, string> = {
     carousel: 'Property Suggestions',
     card: 'Property Details',
-    image: 'Image',
+    image: 'Image',''
     map: 'Location'
   }
   return titles[type] ?? 'Information'

@@ -193,6 +193,98 @@ export function extractArtifacts(source: string): ExtractArtifactsResult {
   }
 }
 
+/**
+ * Extracts embedded JSON from text that looks like a carousel or property card.
+ * The JSON may be embedded in the middle of text, not wrapped in [tool:] tags.
+ */
+function extractEmbeddedToolJson(text: string): ExtractToolsResult {
+  const tools: ExtractedToolPart[] = []
+  let cleanedText = text
+
+  // Pattern to find JSON objects that look like carousel data
+  // Matches {"title":..., "items":[...]} pattern
+  const jsonPattern = /\{"title"\s*:\s*"[^"]*"\s*,\s*"items"\s*:\s*\[/g
+
+  let match: RegExpExecArray | null
+  const matches: Array<{ start: number }> = []
+
+  // Find all potential JSON starts
+  while ((match = jsonPattern.exec(text)) !== null) {
+    matches.push({ start: match.index })
+  }
+
+  // Process matches in reverse order to preserve indices when removing
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i]!
+
+    try {
+      // Find complete JSON by balancing braces
+      const startIdx = m.start
+      let braceCount = 0
+      let endIdx = startIdx
+      let inString = false
+      let escape = false
+
+      for (let j = startIdx; j < cleanedText.length; j++) {
+        const char = cleanedText[j]
+
+        if (escape) {
+          escape = false
+          continue
+        }
+
+        if (char === '\\') {
+          escape = true
+          continue
+        }
+
+        if (char === '"' && !escape) {
+          inString = !inString
+          continue
+        }
+
+        if (!inString) {
+          if (char === '{') braceCount++
+          if (char === '}') {
+            braceCount--
+            if (braceCount === 0) {
+              endIdx = j + 1
+              break
+            }
+          }
+        }
+      }
+
+      if (endIdx > startIdx) {
+        const jsonStr = cleanedText.substring(startIdx, endIdx)
+        const parsed = JSON.parse(jsonStr)
+
+        // Check if this looks like a carousel
+        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+          const firstItem = parsed.items[0] as Record<string, unknown>
+          if (firstItem && (firstItem.title || firstItem.image || firstItem.price)) {
+            tools.push({
+              type: 'tool-carousel',
+              state: 'output-available',
+              output: parsed,
+              input: parsed,
+              toolCallId: generateToolId('carousel', jsonStr)
+            })
+
+            // Remove JSON from text
+            cleanedText = cleanedText.substring(0, startIdx) + cleanedText.substring(endIdx)
+          }
+        }
+      }
+    } catch {
+      // JSON parsing failed, skip
+      continue
+    }
+  }
+
+  return { cleanedText: cleanedText.trim(), tools }
+}
+
 export function parseRichContent(raw: string): ParsedRichContent {
   // First clean router JSON
   const cleanedFromRouter = cleanRouterJson(raw)
@@ -200,12 +292,18 @@ export function parseRichContent(raw: string): ParsedRichContent {
   // Extract artifacts
   const { cleanedText: afterArtifacts, artifacts } = extractArtifacts(cleanedFromRouter)
 
-  // Extract tools
-  const { cleanedText: finalText, tools } = extractTools(afterArtifacts)
+  // Extract tools from [tool:] tags
+  const { cleanedText: afterTagTools, tools: tagTools } = extractTools(afterArtifacts)
+
+  // Extract embedded JSON tools (without [tool:] wrapper)
+  const { cleanedText: finalText, tools: embeddedTools } = extractEmbeddedToolJson(afterTagTools)
+
+  // Combine all tools
+  const allTools = [...tagTools, ...embeddedTools]
 
   return {
     markdown: finalText,
     artifacts,
-    tools
+    tools: allTools
   }
 }

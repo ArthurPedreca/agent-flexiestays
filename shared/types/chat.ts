@@ -16,9 +16,17 @@ export interface TextUIPart {
   state?: 'waiting' | 'streaming' | 'done'
 }
 
+export interface ToolUIPart {
+  type: `tool-${string}`
+  state: 'input-available' | 'input-streaming' | 'output-available' | 'output-error'
+  output?: Record<string, unknown>
+  input?: Record<string, unknown>
+  toolCallId: string
+}
+
 export type BaseUIPart = UIMessage['parts'][number]
 
-export type FlexiMessagePart = BaseUIPart | ArtifactUIPart | TextUIPart
+export type FlexiMessagePart = BaseUIPart | ArtifactUIPart | TextUIPart | ToolUIPart
 
 export type FlexiMessage = Omit<UIMessage, 'parts'> & {
   parts: FlexiMessagePart[]

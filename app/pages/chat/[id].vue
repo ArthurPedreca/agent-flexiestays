@@ -2,6 +2,11 @@
 import type { DefineComponent } from "vue";
 import type { FlexiMessage } from "../../../shared/types/chat";
 import type { UIMessage } from "ai";
+import type { WeatherUIToolInvocation } from "../../../shared/utils/tools/weather";
+import type { ChartUIToolInvocation } from "../../../shared/utils/tools/chart";
+import type { CarouselUIToolInvocation } from "../../../shared/utils/tools/carousel";
+import type { PropertyCardUIToolInvocation } from "../../../shared/utils/tools/property-card";
+import type { ImageDisplayUIToolInvocation } from "../../../shared/utils/tools/image-display";
 import { useClipboard } from "@vueuse/core";
 import { getTextFromMessage } from "@nuxt/ui/utils/ai";
 import ProseStreamPre from "../../components/prose/PreStream.vue";
@@ -59,8 +64,9 @@ interface ChatData {
   messages: ChatMessage[];
 }
 
-const { data } = await useFetch<ChatData>(`/api/chats/${route.params.id}`, {
-  cache: "force-cache",
+const { data, refresh } = await useFetch<ChatData>(`/api/chats/${route.params.id}`, {
+  key: `chat-${route.params.id}`,
+  watch: [() => route.params.id],
 });
 
 if (!data.value) {
@@ -187,14 +193,33 @@ watch(error, (value) => {
                   :text="part.text"
                   :is-streaming="part.state !== 'done'"
                 />
-                <!-- Show loading dots when waiting for first response -->
+                <!-- Show loading dots when waiting for first response (no text yet) -->
                 <LoadingDots
                   v-else-if="
                     part.type === 'text' &&
                     'state' in part &&
-                    part.state === 'waiting'
+                    part.state === 'waiting' &&
+                    !part.text
                   "
                 />
+                <!-- Show text content + loading dots when tool is streaming -->
+                <template
+                  v-else-if="
+                    part.type === 'text' &&
+                    'state' in part &&
+                    part.state === 'waiting' &&
+                    part.text
+                  "
+                >
+                  <MDCCached
+                    :value="part.text"
+                    :cache-key="`${message.id}-${index}`"
+                    :components="components"
+                    :parser-options="{ highlight: false }"
+                    class="*:first:mt-0 *:last:mb-0"
+                  />
+                  <LoadingDots />
+                </template>
                 <!-- Show text content when streaming or done -->
                 <MDCCached
                   v-else-if="part.type === 'text' && part.text"
@@ -206,6 +231,7 @@ watch(error, (value) => {
                 />
                 <!-- Empty state fallback for text parts without content -->
                 <LoadingDots v-else-if="part.type === 'text' && !part.text" />
+                <!-- Tool components -->
                 <ToolWeather
                   v-else-if="part.type === 'tool-weather'"
                   :invocation="(part as WeatherUIToolInvocation)"
@@ -214,9 +240,17 @@ watch(error, (value) => {
                   v-else-if="part.type === 'tool-chart'"
                   :invocation="(part as ChartUIToolInvocation)"
                 />
-                <ArtifactRenderer
-                  v-else-if="part.type === 'artifact'"
-                  :artifact="part"
+                <ToolCarousel
+                  v-else-if="part.type === 'tool-carousel'"
+                  :invocation="(part as CarouselUIToolInvocation)"
+                />
+                <ToolPropertyCard
+                  v-else-if="part.type === 'tool-property-card'"
+                  :invocation="(part as PropertyCardUIToolInvocation)"
+                />
+                <ToolImageDisplay
+                  v-else-if="part.type === 'tool-image-display'"
+                  :invocation="(part as ImageDisplayUIToolInvocation)"
                 />
               </template>
             </div>

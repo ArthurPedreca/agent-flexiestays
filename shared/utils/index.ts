@@ -1,3 +1,6 @@
 export * from './tools/weather'
 export * from './tools/chart'
+export * from './tools/carousel'
+export * from './tools/property-card'
+export * from './tools/image-display'
 export * from './rich-text'

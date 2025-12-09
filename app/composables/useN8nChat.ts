@@ -1,7 +1,14 @@
-import type { FlexiMessage, ArtifactUIPart } from '../../shared/types/chat'
-import { extractArtifacts } from '../../shared/utils'
+import type { FlexiMessage, FlexiMessagePart } from '../../shared/types/chat'
 
 export type ChatStatus = 'ready' | 'streaming' | 'submitting'
+
+// Tool invocation types
+interface ToolInvocationPart {
+  type: string // 'tool-carousel' | 'tool-property-card' | 'tool-image-display'
+  state: 'input-available' | 'input-streaming' | 'output-available' | 'output-error'
+  output?: Record<string, unknown>
+  toolCallId: string
+}
 
 interface MutableTextPart {
   type: 'text'
@@ -19,13 +26,14 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
   const messages = ref<FlexiMessage[]>(
     initialMessages?.length
-      ? [...initialMessages]
+      ? normalizeInitialMessages([...initialMessages])
       : [{
         id: generateMessageId(),
         role: 'assistant',
         parts: [{
           type: 'text',
-          text: 'Hello! I\'m your Flexiestays assistant. How can I help you find your perfect accommodation today?'
+          text: 'Hello! I\'m your Flexiestays assistant. How can I help you find your perfect accommodation today?',
+          state: 'done'
         }]
       }]
   )
@@ -79,7 +87,7 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
       let buffer = ''
       let rawContent = ''
-      const seenArtifacts = new Set<string>()
+      const seenTools = new Set<string>()
       let hasReceivedContent = false
 
       while (true) {
@@ -99,9 +107,6 @@ export function useN8nChat(options: UseN8nChatOptions) {
             if (parsed.type === 'item' && parsed.content) {
               const content = parsed.content
 
-              // Skip artifact tag tokens during streaming
-              if (isArtifactToken(content)) continue
-
               if (!hasReceivedContent) {
                 hasReceivedContent = true
                 textPart.state = 'streaming'
@@ -109,15 +114,23 @@ export function useN8nChat(options: UseN8nChatOptions) {
 
               rawContent += content
 
-              // Extract artifacts and update text
-              const { cleanedText, artifacts } = extractArtifacts(rawContent)
+              // Clean router JSON and extract tools from content
+              const cleanedContent = cleanRouterJson(rawContent)
+              const { text: cleanedText, tools, isToolStreaming } = extractToolCalls(cleanedContent)
               textPart.text = cleanedText
 
-              // Add new artifacts
-              for (const artifact of artifacts) {
-                if (!seenArtifacts.has(artifact.id)) {
-                  seenArtifacts.add(artifact.id)
-                  assistantMessage.parts.push({ ...artifact })
+              // If a tool is being streamed, show loading state
+              if (isToolStreaming) {
+                textPart.state = 'waiting'
+              } else {
+                textPart.state = 'streaming'
+              }
+
+              // Add new tool invocations
+              for (const tool of tools) {
+                if (!seenTools.has(tool.toolCallId)) {
+                  seenTools.add(tool.toolCallId)
+                  assistantMessage.parts.push(tool)
                 }
               }
 
@@ -134,15 +147,16 @@ export function useN8nChat(options: UseN8nChatOptions) {
       if (buffer.trim()) {
         try {
           const parsed = JSON.parse(buffer)
-          if (parsed.type === 'item' && parsed.content && !isArtifactToken(parsed.content)) {
+          if (parsed.type === 'item' && parsed.content) {
             rawContent += parsed.content
-            const { cleanedText, artifacts } = extractArtifacts(rawContent)
+            const cleanedContent = cleanRouterJson(rawContent)
+            const { text: cleanedText, tools } = extractToolCalls(cleanedContent)
             textPart.text = cleanedText
 
-            for (const artifact of artifacts) {
-              if (!seenArtifacts.has(artifact.id)) {
-                seenArtifacts.add(artifact.id)
-                assistantMessage.parts.push({ ...artifact })
+            for (const tool of tools) {
+              if (!seenTools.has(tool.toolCallId)) {
+                seenTools.add(tool.toolCallId)
+                assistantMessage.parts.push(tool)
               }
             }
             messages.value = [...messages.value]
@@ -184,27 +198,11 @@ export function useN8nChat(options: UseN8nChatOptions) {
     })
   }
 
-  // Bootstrap pending messages
-  const shouldBootstrapPending = Boolean(
-    initialMessages?.length &&
-    initialMessages[initialMessages.length - 1]?.role === 'user'
-  )
-
-  if (import.meta.client && shouldBootstrapPending) {
-    setTimeout(() => {
-      const pendingMessage = findPendingUserMessage(messages.value)
-      if (!pendingMessage) return
-
-      const pendingText = getTextFromParts(pendingMessage.parts).trim()
-      if (!pendingText) return
-
-      streamMessage({
-        text: pendingText,
-        persistUserMessage: false,
-        existingUserMessage: pendingMessage
-      })
-    }, 0)
-  }
+  // Bootstrap pending messages - DISABLED
+  // This was causing messages to be re-sent on page reload.
+  // Messages are now persisted in the database and loaded on page load.
+  // If you need to resume incomplete responses, implement a proper
+  // "pending" state in the database instead.
 
   const stop = () => {
     abortController.value?.abort()
@@ -300,13 +298,262 @@ async function safeReadBody(response: Response): Promise<string> {
   }
 }
 
-// Skip streaming artifact tag tokens
-const ARTIFACT_TOKENS = new Set([
-  '[', ']', 'artifact', '[artifact', 'artifact]',
-  '/artifact', '[/artifact', '/artifact]', '[/artifact]'
-])
+// Tool name mapping
+const TOOL_TYPE_MAP: Record<string, string> = {
+  carousel: 'tool-carousel',
+  'property-card': 'tool-property-card',
+  'image-display': 'tool-image-display',
+  propertyCard: 'tool-property-card',
+  imageDisplay: 'tool-image-display'
+}
 
-function isArtifactToken(content: string): boolean {
+// Regex to match tool calls: [tool:toolName]{...json...}[/tool]
+const TOOL_REGEX = /\[tool:(\w+(?:-\w+)*)\]([\s\S]*?)\[\/tool\]/gi
+
+function generateToolId(toolName: string, data: string): string {
+  let hash = 0
+  const input = `${toolName}:${data}`
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash << 5) - hash + input.charCodeAt(i)
+    hash |= 0
+  }
+  return `tool-${Math.abs(hash).toString(36)}`
+}
+
+interface ExtractedTool {
+  type: `tool-${string}`
+  state: 'output-available'
+  output: Record<string, unknown>
+  input: Record<string, unknown>
+  toolCallId: string
+}
+
+interface ExtractToolsResult {
+  text: string
+  tools: ExtractedTool[]
+  isToolStreaming: boolean
+}
+
+// Regex to detect partial/incomplete tool tags
+const PARTIAL_TOOL_REGEX = /\[tool:[\w-]*(?:\][\s\S]*)?$/
+
+/**
+ * Extracts tool calls from content.
+ * Format: [tool:carousel]{"title": "...", "items": [...]}[/tool]
+ */
+function extractToolCalls(content: string): ExtractToolsResult {
+  if (!content) {
+    return { text: '', tools: [], isToolStreaming: false }
+  }
+
+  const tools: ExtractedTool[] = []
+
+  // First, extract complete tools
+  let cleanedText = content.replace(TOOL_REGEX, (_, toolName: string, payload: string) => {
+    const normalizedName = toolName.toLowerCase()
+    const type = (TOOL_TYPE_MAP[normalizedName] || `tool-${normalizedName}`) as `tool-${string}`
+
+    let data: Record<string, unknown> = {}
+    const payloadTrimmed = payload?.trim() ?? ''
+
+    if (payloadTrimmed) {
+      try {
+        const parsed = JSON.parse(payloadTrimmed)
+        data = typeof parsed === 'object' && parsed !== null
+          ? parsed as Record<string, unknown>
+          : { value: parsed }
+      } catch {
+        // If JSON parse fails, try to extract partial data
+        data = { raw: payloadTrimmed }
+      }
+    }
+
+    tools.push({
+      type,
+      state: 'output-available',
+      output: data,
+      input: data,
+      toolCallId: generateToolId(toolName, payloadTrimmed)
+    })
+
+    return '' // Remove the tool tag from text
+  })
+
+  // Check if there's a partial/incomplete tool being streamed
+  const partialMatch = cleanedText.match(PARTIAL_TOOL_REGEX)
+  const isToolStreaming = partialMatch !== null
+
+  // If there's a partial tool, remove it from the displayed text
+  if (isToolStreaming) {
+    cleanedText = cleanedText.replace(PARTIAL_TOOL_REGEX, '')
+  }
+
+  return {
+    text: cleanedText.trim(),
+    tools,
+    isToolStreaming
+  }
+}
+
+/**
+ * Cleans router JSON from content, extracting only the response field.
+ * Router format: {"route": "general", "response": "actual message"}
+ * Also handles: {"route": "propriedades", "response": ""}Content from specialist agent
+ */
+function cleanRouterJson(content: string): string {
   const trimmed = content.trim()
-  return ARTIFACT_TOKENS.has(trimmed) || trimmed.startsWith('[artifact ')
+
+  // Quick check - if it doesn't start with { or doesn't have "route", return as-is
+  if (!trimmed.startsWith('{') || !trimmed.includes('"route"')) {
+    return content
+  }
+
+  // Pattern to match complete router JSON (with possibly empty response)
+  // Matches: {"route": "...", "response": "..."}
+  const routerJsonPattern = /^\s*\{\s*"route"\s*:\s*"[^"]*"\s*,\s*"response"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*\}/
+
+  const match = trimmed.match(routerJsonPattern)
+  if (match && match[1] !== undefined) {
+    // Extract the response content (may be empty)
+    const responseContent = match[1]
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, '\n')
+      .replace(/\\\\/g, '\\')
+
+    // Get anything after the JSON (content from specialist agent)
+    const afterJson = trimmed.slice(match[0].length)
+
+    // Combine response content with anything after (if response was empty, just return what's after)
+    const result = responseContent + afterJson
+    return result.trim() ? result : ''
+  }
+
+  // Check if we're still building the JSON (partial)
+  const responseMarker = '"response":'
+  const responseIdx = trimmed.indexOf(responseMarker)
+
+  if (responseIdx === -1) {
+    // Still building the route part, hide everything
+    return ''
+  }
+
+  // Find the closing brace to see if JSON is complete
+  const lastBrace = trimmed.lastIndexOf('}')
+  const lastQuote = trimmed.lastIndexOf('"')
+
+  // If JSON looks complete but regex didn't match, try JSON.parse
+  if (lastBrace > responseIdx && lastBrace > lastQuote) {
+    try {
+      // Find the end of the JSON object
+      const jsonEnd = lastBrace + 1
+      const jsonPart = trimmed.slice(0, jsonEnd)
+      const parsed = JSON.parse(jsonPart)
+
+      if (parsed && typeof parsed.route === 'string') {
+        const response = typeof parsed.response === 'string' ? parsed.response : ''
+        const afterJson = trimmed.slice(jsonEnd)
+        return (response + afterJson).trim() ? response + afterJson : ''
+      }
+    } catch {
+      // Continue with partial handling
+    }
+  }
+
+  // Still building - extract partial response content
+  let valueStart = responseIdx + responseMarker.length
+
+  // Skip whitespace after :
+  while (valueStart < trimmed.length && trimmed[valueStart] !== undefined && /\s/.test(trimmed[valueStart]!)) {
+    valueStart++
+  }
+
+  // Check if it's a string value starting with "
+  if (trimmed[valueStart] !== '"') {
+    return content
+  }
+
+  valueStart++ // Skip the opening quote
+
+  // Extract the partial response, handling escapes
+  let response = ''
+  let i = valueStart
+  while (i < trimmed.length) {
+    const char = trimmed[i]
+    if (char === '\\' && i + 1 < trimmed.length) {
+      const nextChar = trimmed[i + 1]
+      if (nextChar === '"') {
+        response += '"'
+        i += 2
+      } else if (nextChar === 'n') {
+        response += '\n'
+        i += 2
+      } else if (nextChar === '\\') {
+        response += '\\'
+        i += 2
+      } else {
+        response += char
+        i++
+      }
+    } else if (char === '"') {
+      break
+    } else {
+      response += char
+      i++
+    }
+  }
+
+  return response
+}
+
+/**
+ * Normalizes initial messages loaded from the database.
+ * - Cleans router JSON from text
+ * - Extracts tool calls and converts them to tool parts
+ * - Sets state to 'done' for all text parts
+ */
+function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
+  return messages.map(message => {
+    const newParts: FlexiMessagePart[] = []
+
+    for (const part of message.parts) {
+      if (part.type === 'text' && 'text' in part && typeof part.text === 'string') {
+        // Clean router JSON first
+        const cleanedContent = cleanRouterJson(part.text)
+        
+        // Extract tools from the content
+        const { text: finalText, tools } = extractToolCalls(cleanedContent)
+
+        // Add the cleaned text part
+        if (finalText.trim()) {
+          newParts.push({
+            type: 'text',
+            text: finalText,
+            state: 'done'
+          })
+        }
+
+        // Add extracted tools as separate parts
+        for (const tool of tools) {
+          newParts.push(tool as unknown as FlexiMessagePart)
+        }
+      } else {
+        // Keep non-text parts as-is
+        newParts.push(part)
+      }
+    }
+
+    // If no parts were added, add an empty text part
+    if (newParts.length === 0) {
+      newParts.push({
+        type: 'text',
+        text: '',
+        state: 'done'
+      })
+    }
+
+    return {
+      ...message,
+      parts: newParts
+    }
+  })
 }

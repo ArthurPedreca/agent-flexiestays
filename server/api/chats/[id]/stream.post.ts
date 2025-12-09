@@ -2,10 +2,11 @@ import { z } from 'zod'
 import { parseRichContent } from '../../../../shared/utils'
 import { useDrizzle, tables, eq, and } from '../../../database/drizzle'
 
-// Tokens to skip during streaming (artifact tag fragments)
+// Tokens to skip during streaming (artifact and tool tag fragments)
 const STREAM_SKIP_TOKENS = new Set([
   '[', ']', 'artifact', '[artifact', 'artifact]',
-  '/artifact', '[/artifact', '/artifact]', '[/artifact]'
+  '/artifact', '[/artifact', '/artifact]', '[/artifact]',
+  'tool', '[tool', 'tool]', '/tool', '[/tool', '/tool]', '[/tool]'
 ])
 
 defineRouteMeta({
@@ -212,7 +213,16 @@ export default defineEventHandler(async (event) => {
           }
 
           if (parsed.artifacts.length) {
-            assistantParts.push(...parsed.artifacts)
+            for (const artifact of parsed.artifacts) {
+              assistantParts.push(artifact as unknown as Record<string, unknown>)
+            }
+          }
+
+          // Add extracted tools to parts
+          if (parsed.tools.length) {
+            for (const tool of parsed.tools) {
+              assistantParts.push(tool as unknown as Record<string, unknown>)
+            }
           }
 
           if (assistantParts.length) {

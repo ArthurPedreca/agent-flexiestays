@@ -196,10 +196,10 @@ export function extractArtifacts(source: string): ExtractArtifactsResult {
 export function parseRichContent(raw: string): ParsedRichContent {
   // First clean router JSON
   const cleanedFromRouter = cleanRouterJson(raw)
-  
+
   // Extract artifacts
   const { cleanedText: afterArtifacts, artifacts } = extractArtifacts(cleanedFromRouter)
-  
+
   // Extract tools
   const { cleanedText: finalText, tools } = extractTools(afterArtifacts)
 

@@ -519,7 +519,7 @@ function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
       if (part.type === 'text' && 'text' in part && typeof part.text === 'string') {
         // Clean router JSON first
         const cleanedContent = cleanRouterJson(part.text)
-        
+
         // Extract tools from the content
         const { text: finalText, tools } = extractToolCalls(cleanedContent)
 

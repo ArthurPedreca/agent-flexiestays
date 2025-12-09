@@ -64,10 +64,13 @@ interface ChatData {
   messages: ChatMessage[];
 }
 
-const { data, refresh } = await useFetch<ChatData>(`/api/chats/${route.params.id}`, {
-  key: `chat-${route.params.id}`,
-  watch: [() => route.params.id],
-});
+const { data, refresh } = await useFetch<ChatData>(
+  `/api/chats/${route.params.id}`,
+  {
+    key: `chat-${route.params.id}`,
+    watch: [() => route.params.id],
+  }
+);
 
 if (!data.value) {
   throw createError({

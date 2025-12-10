@@ -26,9 +26,10 @@ export default defineEventHandler(async (event) => {
     id: z.string().min(1).max(36)
   }).parse)
 
-  const { message, persistUserMessage } = await readValidatedBody(event, z.object({
+  const { message, persistUserMessage, recaptchaToken } = await readValidatedBody(event, z.object({
     message: z.string().trim().min(1),
-    persistUserMessage: z.boolean().optional()
+    persistUserMessage: z.boolean().optional(),
+    recaptchaToken: z.string().nullable().optional()
   }).parse)
 
   const shouldPersistUserMessage = persistUserMessage ?? true
@@ -117,7 +118,8 @@ export default defineEventHandler(async (event) => {
         history,
         userId,
         username: session.user?.username || 'User',
-        userToken: getCookie(event, 'flexiestays_token') || null
+        userToken: getCookie(event, 'flexiestays_token') || null,
+        recaptchaToken: recaptchaToken || null
       })
     })
 
@@ -205,14 +207,6 @@ export default defineEventHandler(async (event) => {
           // Parse final content and save assistant message
           const parsed = parseRichContent(assistantText.trim())
           const assistantParts: Array<Record<string, unknown>> = []
-
-          console.log('[stream.post] Raw assistantText:', assistantText.substring(0, 500))
-          console.log('[stream.post] Parsed result:', {
-            markdownLength: parsed.markdown?.length,
-            artifactsCount: parsed.artifacts?.length,
-            toolsCount: parsed.tools?.length,
-            tools: parsed.tools
-          })
 
           if (parsed.markdown) {
             assistantParts.push({

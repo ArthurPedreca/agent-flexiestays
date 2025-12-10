@@ -1,4 +1,4 @@
-const defaultN8nWebhook = 'https://skoobiedigital.app.n8n.cloud/webhook/flexiestays-agent'
+const defaultN8nWebhook = 'https://skoobiedigital.app.n8n.cloud/webhook-test/flexiestays-agent'
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({

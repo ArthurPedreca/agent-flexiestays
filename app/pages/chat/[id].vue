@@ -84,20 +84,6 @@ const input = ref("");
 const initialMessages = (data.value.messages ??
   []) as unknown as FlexiMessage[];
 
-// Debug: Log what we received from the database
-console.log(
-  "[chat/id] Initial messages from DB:",
-  initialMessages.map((m) => ({
-    role: m.role,
-    partsCount: m.parts?.length,
-    parts: m.parts?.map((p) => ({
-      type: (p as any).type,
-      hasOutput: "output" in (p as any),
-      hasText: "text" in (p as any),
-    })),
-  }))
-);
-
 // Count existing user messages for the limit
 const existingUserMessageCount = initialMessages.filter(
   (m) => m.role === "user"
@@ -108,21 +94,6 @@ const { messages, status, error, sendMessage, stop } = useN8nChat({
   chatId: data.value.id,
   initialMessages,
 });
-
-// Debug: Log normalized messages
-console.log(
-  "[chat/id] Normalized messages:",
-  messages.value.map((m) => ({
-    role: m.role,
-    partsCount: m.parts?.length,
-    parts: m.parts?.map((p) => ({
-      type: (p as any).type,
-      hasOutput: "output" in (p as any),
-      hasText: "text" in (p as any),
-      state: (p as any).state,
-    })),
-  }))
-);
 
 const copied = ref(false);
 const uiMessages = computed(() => messages.value as unknown as UIMessage[]);

@@ -24,6 +24,9 @@ interface UseN8nChatOptions {
 export function useN8nChat(options: UseN8nChatOptions) {
   const { chatId, initialMessages } = options
 
+  // Get recaptcha composable
+  const { execute: executeRecaptcha } = useRecaptcha()
+
   const messages = ref<FlexiMessage[]>(
     initialMessages?.length
       ? normalizeInitialMessages([...initialMessages])
@@ -97,12 +100,21 @@ export function useN8nChat(options: UseN8nChatOptions) {
     abortController.value = new AbortController()
 
     try {
+      // Get reCAPTCHA token
+      let recaptchaToken: string | null = null
+      try {
+        recaptchaToken = await executeRecaptcha('chat_message')
+      } catch (recaptchaError) {
+        console.warn('Failed to get reCAPTCHA token:', recaptchaError)
+      }
+
       const response = await fetch(`/api/chats/${chatId}/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: normalizedText,
-          persistUserMessage: options.persistUserMessage
+          persistUserMessage: options.persistUserMessage,
+          recaptchaToken
         }),
         signal: abortController.value.signal
       })
@@ -553,33 +565,20 @@ function cleanRouterJson(content: string): string {
  * - Normalizes tool parts to ensure consistent format
  */
 function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
-  console.log('[normalizeInitialMessages] Input:', messages.length, 'messages')
-
-  return messages.map((message, msgIdx) => {
+  return messages.map((message) => {
     const newParts: FlexiMessagePart[] = []
 
-    console.log(`[normalizeInitialMessages] Message ${msgIdx} (${message.role}):`, message.parts?.length, 'parts')
-
     for (const part of message.parts) {
-      console.log(`[normalizeInitialMessages] Part type: ${(part as any).type}`)
-
       // Handle text parts - may contain embedded tool tags or raw JSON
       if (part.type === 'text' && 'text' in part && typeof part.text === 'string') {
-        console.log(`[normalizeInitialMessages] Text part, length: ${part.text.length}`)
-        console.log(`[normalizeInitialMessages] Text preview: ${part.text.substring(0, 200)}`)
-
         // Clean router JSON first
         const cleanedContent = cleanRouterJson(part.text)
 
         // Extract tools from [tool:] tags
         const { text: afterToolExtract, tools } = extractToolCalls(cleanedContent)
 
-        console.log(`[normalizeInitialMessages] After extractToolCalls: ${tools.length} tools found`)
-
         // Extract embedded JSON tools (without [tool:] wrapper)
         const { tools: embeddedTools, cleanedText: finalText } = extractEmbeddedToolJson(afterToolExtract)
-
-        console.log(`[normalizeInitialMessages] Embedded JSON tools found: ${embeddedTools.length}`)
 
         // Add the cleaned text part (if any remains)
         if (finalText.trim()) {
@@ -592,19 +591,16 @@ function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
 
         // Add extracted tools from [tool:] tags
         for (const tool of tools) {
-          console.log(`[normalizeInitialMessages] Adding tool from tags: ${tool.type}`)
           newParts.push(tool as unknown as FlexiMessagePart)
         }
 
         // Add tools detected from embedded JSON
         for (const tool of embeddedTools) {
-          console.log(`[normalizeInitialMessages] Adding embedded tool: ${tool.type}`)
           newParts.push(tool as unknown as FlexiMessagePart)
         }
       }
       // Handle tool parts from database - normalize format
       else if (part.type && typeof part.type === 'string' && part.type.startsWith('tool-')) {
-        console.log(`[normalizeInitialMessages] Tool part from DB: ${part.type}`)
         // Tool parts from DB have: type, state, output, input, toolCallId
         // Ensure they have the correct format for the UI components
         const toolPart = part as unknown as Record<string, unknown>
@@ -630,8 +626,6 @@ function normalizeInitialMessages(messages: FlexiMessage[]): FlexiMessage[] {
         state: 'done'
       })
     }
-
-    console.log(`[normalizeInitialMessages] Output parts for message ${msgIdx}:`, newParts.map(p => (p as any).type))
 
     return {
       ...message,

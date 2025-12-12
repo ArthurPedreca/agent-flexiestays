@@ -4,6 +4,34 @@
 @theme static {
   --font-sans: 'Public Sans', sans-serif;
 
+  /* Flexiestays Brand Colors */
+  /* Primary - Deep Navy (#0B0C26) */
+  --color-flexie-50: #e8e8f0;
+  --color-flexie-100: #c5c6d9;
+  --color-flexie-200: #9fa0bf;
+  --color-flexie-300: #7879a5;
+  --color-flexie-400: #5b5c91;
+  --color-flexie-500: #3e3f7d;
+  --color-flexie-600: #2d2e5f;
+  --color-flexie-700: #26284F;
+  --color-flexie-800: #191a3b;
+  --color-flexie-900: #0B0C26;
+  --color-flexie-950: #050611;
+
+  /* Tertiary - Turquoise/Teal Accent (#4ce0cb) */
+  --color-flexie-accent-50: #e6fcf9;
+  --color-flexie-accent-100: #c0f7ef;
+  --color-flexie-accent-200: #8bf0e0;
+  --color-flexie-accent-300: #4ce0cb;
+  --color-flexie-accent-400: #2dd4bf;
+  --color-flexie-accent-500: #14b8a6;
+  --color-flexie-accent-600: #0d9488;
+  --color-flexie-accent-700: #0f766e;
+  --color-flexie-accent-800: #115e59;
+  --color-flexie-accent-900: #134e4a;
+  --color-flexie-accent-950: #042f2e;
+
+  /* Legacy green colors for compatibility */
   --color-green-50: #EFFDF5;
   --color-green-100: #D9FBE8;
   --color-green-200: #B3F5D1;
@@ -15,8 +43,40 @@
   --color-green-800: #016538;
   --color-green-900: #0A5331;
   --color-green-950: #052E16;
+
+  /* Teal color palette for primary accent */
+  --color-teal-50: #e6fcf9;
+  --color-teal-100: #c0f7ef;
+  --color-teal-200: #8bf0e0;
+  --color-teal-300: #4ce0cb;
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --color-teal-600: #0d9488;
+  --color-teal-700: #0f766e;
+  --color-teal-800: #115e59;
+  --color-teal-900: #134e4a;
+  --color-teal-950: #042f2e;
 }
 
 :root {
   --ui-container: var(--container-3xl);
+
+  /* Flexiestays theme variables */
+  --flexie-primary: #0B0C26;
+  --flexie-secondary: #26284F;
+  --flexie-tertiary: #4ce0cb;
+  --flexie-background: #F6F6FA;
+  --flexie-border: #caccdc;
+}
+
+/* Light mode overrides for Flexiestays theme */
+:root {
+  --ui-bg: var(--flexie-background);
+  --ui-border: var(--flexie-border);
+}
+
+/* Dark mode overrides for Flexiestays theme */
+.dark {
+  --ui-bg: var(--flexie-primary);
+  --ui-border: var(--flexie-secondary);
 }

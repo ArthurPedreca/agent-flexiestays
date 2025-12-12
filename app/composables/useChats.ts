@@ -59,7 +59,7 @@ export function useChats(chats: Ref<Chat[] | undefined>) {
     if (active.length) {
       formatted.push({
         id: 'active-connections',
-        label: 'Sessões do agente',
+        label: 'All Chats',
         items: active
       })
     }

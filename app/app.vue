@@ -1,34 +1,56 @@
 <script setup lang="ts">
-const colorMode = useColorMode()
+import { useSettings } from "~/composables/useSettings";
 
-const color = computed(() => colorMode.value === 'dark' ? '#1b1718' : 'white')
+const colorMode = useColorMode();
+const { siteName, favicon, primaryColor, initSettings, isLoaded } =
+  useSettings();
+
+// Initialize settings on app mount
+onMounted(async () => {
+  await initSettings();
+});
+
+// Dynamic theme color based on mode and API colors
+const themeColor = computed(() => {
+  if (!isLoaded.value) {
+    return colorMode.value === "dark" ? "#0B0C26" : "#F6F6FA";
+  }
+  return colorMode.value === "dark" ? primaryColor.value : "#F6F6FA";
+});
+
+// Dynamic page title
+const pageTitle = computed(() =>
+  isLoaded.value ? `Agent ${siteName.value}` : "Agent Flexiestays"
+);
+
+// Dynamic favicon
+const faviconUrl = computed(() =>
+  isLoaded.value && favicon.value ? favicon.value : "/favicon.ico"
+);
 
 useHead({
+  title: pageTitle,
   meta: [
-    { charset: 'utf-8' },
-    { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-    { key: 'theme-color', name: 'theme-color', content: color }
+    { charset: "utf-8" },
+    { name: "viewport", content: "width=device-width, initial-scale=1" },
+    { key: "theme-color", name: "theme-color", content: themeColor },
   ],
-  link: [
-    { rel: 'icon', href: '/favicon.ico' }
-  ],
+  link: [{ rel: "icon", href: faviconUrl, type: "image/png" }],
   htmlAttrs: {
-    lang: 'en'
-  }
-})
+    lang: "en",
+  },
+});
 
-const title = 'Nuxt AI Chatbot template'
-const description = 'A full-featured, hackable Nuxt AI chatbot template made with Nuxt UI.'
+const description =
+  "Your AI-powered assistant for flexible stays and accommodation.";
 
 useSeoMeta({
-  title,
+  title: pageTitle,
   description,
-  ogTitle: title,
+  ogTitle: pageTitle,
   ogDescription: description,
-  ogImage: 'https://ui.nuxt.com/assets/templates/nuxt/chat-light.png',
-  twitterImage: 'https://ui.nuxt.com/assets/templates/nuxt/chat-light.png',
-  twitterCard: 'summary_large_image'
-})
+  twitterCard: "summary_large_image",
+});
 </script>
 
 <template>

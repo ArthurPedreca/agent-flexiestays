@@ -35,6 +35,95 @@ function formatDetailKey(key: string): string {
   };
   return labels[key.toLowerCase()] ?? key;
 }
+
+// Palavras-chave para detectar hotéis
+const hotelKeywords = [
+  "hotel",
+  "hotels",
+  "aparthotel",
+  "hostel",
+  "inn",
+  "motel",
+  "resort",
+  "lodge",
+  "suites",
+  "b&b",
+  "bed and breakfast",
+  "pousada",
+  "hospedagem",
+];
+
+// Detecta se um item é um hotel baseado em múltiplos indicadores
+function isHotelItem(item: {
+  id?: string;
+  title?: string;
+  tags?: string[];
+  url?: string;
+}): boolean {
+  const checkText = (text: string | undefined): boolean => {
+    if (!text) return false;
+    const lowerText = text.toLowerCase();
+    return hotelKeywords.some((keyword) => lowerText.includes(keyword));
+  };
+
+  // Verifica ID
+  if (checkText(item.id)) return true;
+
+  // Verifica título
+  if (checkText(item.title)) return true;
+
+  // Verifica URL (se contém /hotel/ ou hotels)
+  if (item.url) {
+    const lowerUrl = item.url.toLowerCase();
+    if (lowerUrl.includes("/hotel") || lowerUrl.includes("hotels")) return true;
+  }
+
+  // Verifica tags
+  if (item.tags?.some((tag) => checkText(tag))) return true;
+
+  return false;
+}
+
+// Extrai o slug de uma URL
+function extractSlug(url: string): string {
+  // Remove query strings e hash
+  const withoutQuery = url.split("?")[0] ?? url;
+  const cleanUrl = withoutQuery.split("#")[0] ?? withoutQuery;
+  // Pega o último segmento da URL
+  const segments = cleanUrl.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? "";
+}
+
+function formatActionUrl(
+  url: string | undefined,
+  itemContext?: { id?: string; title?: string; tags?: string[] }
+): string {
+  if (!url) return "";
+
+  // Se já é uma URL absoluta do flexiestays.com, retorna como está
+  if (url.startsWith("https://flexiestays.com")) {
+    return url;
+  }
+
+  // Se é outra URL absoluta externa, retorna como está
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  const baseUrl = "https://flexiestays.com";
+  const slug = extractSlug(url);
+
+  if (!slug) return url;
+
+  // Detecta o tipo baseado na URL e no contexto do item
+  const contextWithUrl = { ...itemContext, url };
+  const isHotel = isHotelItem(contextWithUrl);
+
+  // Retorna a URL formatada corretamente
+  return isHotel
+    ? `${baseUrl}/hotels/${slug}`
+    : `${baseUrl}/properties/${slug}`;
+}
 </script>
 
 <template>
@@ -148,7 +237,13 @@ function formatDetailKey(key: string): string {
             <UButton
               v-for="(action, index) in invocation.output.actions"
               :key="index"
-              :to="action.url"
+              :to="
+                formatActionUrl(action.url, {
+                  id: invocation.output.id,
+                  title: invocation.output.title,
+                  tags: invocation.output.tags,
+                })
+              "
               target="_blank"
               size="sm"
               :variant="index === 0 ? 'solid' : 'outline'"

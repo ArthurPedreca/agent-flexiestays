@@ -62,6 +62,22 @@ const imageData = computed<ImageData>(() => {
 const title = computed(() => props.artifact.title ?? getFallbackTitle(props.artifact.artifactType))
 const formattedData = computed(() => JSON.stringify(props.artifact.data ?? {}, null, 2))
 
+const failedImages = reactive(new Set<string | number>())
+const cardImageError = ref(false)
+const singleImageError = ref(false)
+
+function handleCarouselImageError(itemKey: string | number) {
+  failedImages.add(itemKey)
+}
+
+function handleCardImageError() {
+  cardImageError.value = true
+}
+
+function handleSingleImageError() {
+  singleImageError.value = true
+}
+
 function getFallbackTitle(type: string): string {
   const titles: Record<string, string> = {
     carousel: 'Property Suggestions',
@@ -101,11 +117,12 @@ function formatPrice(price: string | number | undefined): string {
         class="group flex flex-col overflow-hidden rounded-xl border border-default bg-elevated transition-shadow hover:shadow-lg"
       >
         <!-- Image -->
-        <div v-if="item.image" class="relative aspect-video overflow-hidden">
+        <div v-if="item.image && !failedImages.has(item.id ?? `carousel-${index}`)" class="relative aspect-video overflow-hidden">
           <img
             :src="item.image"
             :alt="item.title ?? 'Property image'"
             class="h-full w-full object-cover transition-transform group-hover:scale-105"
+            @error="handleCarouselImageError(item.id ?? `carousel-${index}`)"
           >
           <div v-if="item.price" class="absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-sm font-semibold text-white">
             {{ formatPrice(item.price) }}/night
@@ -161,11 +178,12 @@ function formatPrice(price: string | number | undefined): string {
     >
       <div class="flex flex-col sm:flex-row">
         <!-- Image -->
-        <div v-if="cardData.image" class="relative sm:w-2/5">
+        <div v-if="cardData.image && !cardImageError" class="relative sm:w-2/5">
           <img
             :src="cardData.image"
             :alt="cardData.title ?? 'Property image'"
             class="h-48 w-full object-cover sm:h-full"
+            @error="handleCardImageError"
           >
           <div v-if="cardData.price" class="absolute bottom-3 left-3 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-bold text-white">
             {{ formatPrice(cardData.price) }}/night
@@ -224,13 +242,14 @@ function formatPrice(price: string | number | undefined): string {
 
     <!-- IMAGE: Single image with caption -->
     <figure 
-      v-else-if="isImage && imageData.src"
+      v-else-if="isImage && imageData.src && !singleImageError"
       class="overflow-hidden rounded-xl border border-default"
     >
       <img
         :src="imageData.src"
         :alt="imageData.alt ?? 'Image'"
         class="w-full object-cover"
+        @error="handleSingleImageError"
       >
       <figcaption v-if="imageData.caption" class="bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
         {{ imageData.caption }}

@@ -15,6 +15,12 @@ const isError = computed(() => props.invocation.state === "output-error");
 
 const title = computed(() => props.invocation.output?.title ?? "Acomodações");
 
+const failedImages = reactive(new Set<string | number>());
+
+function handleImageError(itemKey: string | number) {
+  failedImages.add(itemKey);
+}
+
 function formatPrice(price: string | number | undefined): string {
   if (!price) return "";
   if (typeof price === "number") return `£${price}`;
@@ -63,12 +69,13 @@ function formatPrice(price: string | number | undefined): string {
         class="group flex flex-col overflow-hidden rounded-xl border border-default bg-elevated transition-shadow hover:shadow-lg"
       >
         <!-- Image -->
-        <div v-if="item.image" class="relative aspect-video overflow-hidden">
+        <div v-if="item.image && !failedImages.has(item.id ?? `item-${index}`)" class="relative aspect-video overflow-hidden">
           <img
             :src="item.image"
             :alt="item.title"
             class="h-full w-full object-cover transition-transform group-hover:scale-105"
             loading="lazy"
+            @error="handleImageError(item.id ?? `item-${index}`)"
           />
           <div
             v-if="item.price"

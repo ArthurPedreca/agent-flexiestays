@@ -12,6 +12,12 @@ const isLoading = computed(
 );
 
 const isError = computed(() => props.invocation.state === "output-error");
+
+const imageLoadError = ref(false);
+
+function handleImageError() {
+  imageLoadError.value = true;
+}
 </script>
 
 <template>
@@ -44,7 +50,7 @@ const isError = computed(() => props.invocation.state === "output-error");
     <!-- Image -->
     <figure
       v-else-if="
-        invocation.state === 'output-available' && invocation.output?.src
+        invocation.state === 'output-available' && invocation.output?.src && !imageLoadError
       "
       class="overflow-hidden rounded-xl border border-default"
     >
@@ -53,6 +59,7 @@ const isError = computed(() => props.invocation.state === "output-error");
         :alt="invocation.output.alt ?? 'Image'"
         class="w-full object-cover max-h-96"
         loading="lazy"
+        @error="handleImageError"
       />
       <figcaption
         v-if="invocation.output.caption"

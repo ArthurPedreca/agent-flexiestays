@@ -69,7 +69,10 @@ function formatPrice(price: string | number | undefined): string {
         class="group flex flex-col overflow-hidden rounded-xl border border-default bg-elevated transition-shadow hover:shadow-lg"
       >
         <!-- Image -->
-        <div v-if="item.image && !failedImages.has(item.id ?? `item-${index}`)" class="relative aspect-video overflow-hidden">
+        <div
+          v-if="item.image && !failedImages.has(item.id ?? `item-${index}`)"
+          class="relative aspect-video overflow-hidden"
+        >
           <img
             :src="item.image"
             :alt="item.title"

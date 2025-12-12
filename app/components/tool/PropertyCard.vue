@@ -63,7 +63,10 @@ function formatDetailKey(key: string): string {
     >
       <div class="flex flex-col sm:flex-row">
         <!-- Image -->
-        <div v-if="invocation.output.image && !imageError" class="relative sm:w-2/5">
+        <div
+          v-if="invocation.output.image && !imageError"
+          class="relative sm:w-2/5"
+        >
           <img
             :src="invocation.output.image"
             :alt="invocation.output.title"

@@ -50,7 +50,9 @@ function handleImageError() {
     <!-- Image -->
     <figure
       v-else-if="
-        invocation.state === 'output-available' && invocation.output?.src && !imageLoadError
+        invocation.state === 'output-available' &&
+        invocation.output?.src &&
+        !imageLoadError
       "
       class="overflow-hidden rounded-xl border border-default"
     >

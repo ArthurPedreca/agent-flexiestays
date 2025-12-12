@@ -99,8 +99,16 @@ function formatPrice(price: string | number | undefined): string {
   <div class="my-4 space-y-3">
     <!-- Header -->
     <div v-if="title || artifact.description" class="flex items-center gap-2">
-      <UIcon 
-        :name="isCarousel ? 'i-lucide-layout-grid' : isCard ? 'i-lucide-square' : isImage ? 'i-lucide-image' : 'i-lucide-box'"
+      <UIcon
+        :name="
+          isCarousel
+            ? 'i-lucide-layout-grid'
+            : isCard
+            ? 'i-lucide-square'
+            : isImage
+            ? 'i-lucide-image'
+            : 'i-lucide-box'
+        "
         class="size-4 text-primary"
       />
       <span class="text-sm font-medium text-muted-foreground">{{ title }}</span>
@@ -110,21 +118,30 @@ function formatPrice(price: string | number | undefined): string {
     <USkeleton v-if="isPending" class="h-48 w-full rounded-xl" />
 
     <!-- CAROUSEL: Multiple properties -->
-    <div v-else-if="isCarousel && carouselItems.length" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div
+      v-else-if="isCarousel && carouselItems.length"
+      class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+    >
       <div
         v-for="(item, index) in carouselItems"
         :key="item.id ?? `carousel-${index}`"
         class="group flex flex-col overflow-hidden rounded-xl border border-default bg-elevated transition-shadow hover:shadow-lg"
       >
         <!-- Image -->
-        <div v-if="item.image && !failedImages.has(item.id ?? `carousel-${index}`)" class="relative aspect-video overflow-hidden">
+        <div
+          v-if="item.image && !failedImages.has(item.id ?? `carousel-${index}`)"
+          class="relative aspect-video overflow-hidden"
+        >
           <img
             :src="item.image"
             :alt="item.title ?? 'Property image'"
             class="h-full w-full object-cover transition-transform group-hover:scale-105"
             @error="handleCarouselImageError(item.id ?? `carousel-${index}`)"
+          />
+          <div
+            v-if="item.price"
+            class="absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-sm font-semibold text-white"
           >
-          <div v-if="item.price" class="absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-sm font-semibold text-white">
             {{ formatPrice(item.price) }}/night
           </div>
         </div>
@@ -132,11 +149,18 @@ function formatPrice(price: string | number | undefined): string {
         <!-- Content -->
         <div class="flex flex-1 flex-col gap-2 p-4">
           <div>
-            <h4 class="font-semibold text-foreground line-clamp-1">{{ item.title ?? `Property ${index + 1}` }}</h4>
-            <p v-if="item.subtitle" class="text-xs text-muted-foreground">{{ item.subtitle }}</p>
+            <h4 class="font-semibold text-foreground line-clamp-1">
+              {{ item.title ?? `Property ${index + 1}` }}
+            </h4>
+            <p v-if="item.subtitle" class="text-xs text-muted-foreground">
+              {{ item.subtitle }}
+            </p>
           </div>
 
-          <p v-if="item.description" class="text-sm text-muted-foreground line-clamp-2">
+          <p
+            v-if="item.description"
+            class="text-sm text-muted-foreground line-clamp-2"
+          >
             {{ item.description }}
           </p>
 
@@ -164,7 +188,7 @@ function formatPrice(price: string | number | undefined): string {
               color="primary"
               target="_blank"
             >
-              {{ action.label ?? 'View' }}
+              {{ action.label ?? "View" }}
             </UButton>
           </div>
         </div>
@@ -172,7 +196,7 @@ function formatPrice(price: string | number | undefined): string {
     </div>
 
     <!-- CARD: Single property highlight -->
-    <div 
+    <div
       v-else-if="isCard && cardData"
       class="overflow-hidden rounded-xl border border-default bg-elevated shadow-sm"
     >
@@ -184,8 +208,11 @@ function formatPrice(price: string | number | undefined): string {
             :alt="cardData.title ?? 'Property image'"
             class="h-48 w-full object-cover sm:h-full"
             @error="handleCardImageError"
+          />
+          <div
+            v-if="cardData.price"
+            class="absolute bottom-3 left-3 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-bold text-white"
           >
-          <div v-if="cardData.price" class="absolute bottom-3 left-3 rounded-lg bg-black/70 px-3 py-1.5 text-sm font-bold text-white">
             {{ formatPrice(cardData.price) }}/night
           </div>
         </div>
@@ -193,8 +220,12 @@ function formatPrice(price: string | number | undefined): string {
         <!-- Content -->
         <div class="flex flex-1 flex-col gap-3 p-5">
           <div>
-            <h3 class="text-lg font-bold text-foreground">{{ cardData.title ?? 'Property' }}</h3>
-            <p v-if="cardData.subtitle" class="text-sm text-muted-foreground">{{ cardData.subtitle }}</p>
+            <h3 class="text-lg font-bold text-foreground">
+              {{ cardData.title ?? "Property" }}
+            </h3>
+            <p v-if="cardData.subtitle" class="text-sm text-muted-foreground">
+              {{ cardData.subtitle }}
+            </p>
           </div>
 
           <p v-if="cardData.description" class="text-sm text-muted-foreground">
@@ -215,15 +246,27 @@ function formatPrice(price: string | number | undefined): string {
           </div>
 
           <!-- Details grid -->
-          <div v-if="cardData.details && Object.keys(cardData.details).length" class="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-3 text-sm">
-            <div v-for="(value, key) in cardData.details" :key="key" class="flex flex-col">
-              <span class="text-xs text-muted-foreground capitalize">{{ key }}</span>
+          <div
+            v-if="cardData.details && Object.keys(cardData.details).length"
+            class="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-3 text-sm"
+          >
+            <div
+              v-for="(value, key) in cardData.details"
+              :key="key"
+              class="flex flex-col"
+            >
+              <span class="text-xs text-muted-foreground capitalize">{{
+                key
+              }}</span>
               <span class="font-medium">{{ value }}</span>
             </div>
           </div>
 
           <!-- Actions -->
-          <div v-if="cardData.actions?.length" class="mt-auto flex flex-wrap gap-2 pt-2">
+          <div
+            v-if="cardData.actions?.length"
+            class="mt-auto flex flex-wrap gap-2 pt-2"
+          >
             <UButton
               v-for="(action, idx) in cardData.actions"
               :key="action.url ?? idx"
@@ -233,7 +276,7 @@ function formatPrice(price: string | number | undefined): string {
               size="sm"
               target="_blank"
             >
-              {{ action.label ?? 'View' }}
+              {{ action.label ?? "View" }}
             </UButton>
           </div>
         </div>
@@ -241,7 +284,7 @@ function formatPrice(price: string | number | undefined): string {
     </div>
 
     <!-- IMAGE: Single image with caption -->
-    <figure 
+    <figure
       v-else-if="isImage && imageData.src && !singleImageError"
       class="overflow-hidden rounded-xl border border-default"
     >
@@ -250,18 +293,26 @@ function formatPrice(price: string | number | undefined): string {
         :alt="imageData.alt ?? 'Image'"
         class="w-full object-cover"
         @error="handleSingleImageError"
+      />
+      <figcaption
+        v-if="imageData.caption"
+        class="bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
       >
-      <figcaption v-if="imageData.caption" class="bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
         {{ imageData.caption }}
       </figcaption>
     </figure>
 
     <!-- FALLBACK: Unknown artifact type -->
-    <div v-else class="rounded-xl border border-dashed border-default bg-muted/20 p-4">
+    <div
+      v-else
+      class="rounded-xl border border-dashed border-default bg-muted/20 p-4"
+    >
       <p class="mb-2 text-xs text-muted-foreground">
         Artifact: {{ artifact.artifactType }}
       </p>
-      <pre class="max-h-40 overflow-auto text-xs text-muted-foreground">{{ formattedData }}</pre>
+      <pre class="max-h-40 overflow-auto text-xs text-muted-foreground">{{
+        formattedData
+      }}</pre>
     </div>
   </div>
 </template>
